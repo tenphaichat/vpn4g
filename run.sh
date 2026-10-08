@@ -346,7 +346,21 @@ svc_stop(){
     return 0
 }
 
+tune_network_sysctl(){
+    $IS_TERMUX && return 0
+    command -v sysctl >/dev/null 2>&1 || return 0
+    run_as_root sysctl -w net.core.rmem_max=26214400 >/dev/null 2>&1 || true
+    run_as_root sysctl -w net.core.wmem_max=26214400 >/dev/null 2>&1 || true
+    run_as_root sysctl -w net.core.rmem_default=26214400 >/dev/null 2>&1 || true
+    run_as_root sysctl -w net.core.wmem_default=26214400 >/dev/null 2>&1 || true
+    run_as_root sysctl -w net.ipv4.tcp_rmem="4096 87380 26214400" >/dev/null 2>&1 || true
+    run_as_root sysctl -w net.ipv4.tcp_wmem="4096 65536 26214400" >/dev/null 2>&1 || true
+    run_as_root sysctl -w net.core.default_qdisc=fq >/dev/null 2>&1 || true
+    run_as_root sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1 || true
+}
+
 svc_start(){
+    tune_network_sysctl
     if has_systemd; then
         run_as_root systemctl start "$SERVICE_NAME" 2>/dev/null
         return $?
@@ -360,6 +374,7 @@ svc_start(){
 }
 
 svc_restart(){
+    tune_network_sysctl
     if has_systemd; then
         run_as_root systemctl restart "$SERVICE_NAME" 2>/dev/null
         sleep 2
@@ -477,6 +492,7 @@ JSHIM
 install_service(){
     [ -f .env ] || { err "Khong tim thay .env."; return 1; }
     prepare_python || return 1
+    tune_network_sysctl
 
     if has_systemd; then
         if [ "$(id -u)" != "0" ] && ! command -v sudo >/dev/null 2>&1; then

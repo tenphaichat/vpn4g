@@ -319,7 +319,7 @@ def main():
                 inbounds.extend([make_inbound("127.0.0.1", ws_port, "websocket"), make_inbound("127.0.0.1", xhttp_port, "xhttp")])
                 demux_servers.append((ip, port, ws_port, xhttp_port))
             else: inbounds.append(make_inbound(ip, port, TRANSPORTS[0]))
-        xray_config = {"log": {"loglevel": "debug"}, "inbounds": inbounds, "outbounds": [{"protocol": "freedom", "settings": {"domainStrategy": "UseIPv4"}}]}
+        xray_config = {"log": {"loglevel": "warning"}, "inbounds": inbounds, "outbounds": [{"protocol": "freedom", "settings": {"domainStrategy": "UseIPv4"}}]}
         if ENABLE_WARP and wgcf_outbound: xray_config["outbounds"].insert(0, wgcf_outbound)
         with open("config.json", "w", encoding="utf-8") as config_file: json.dump(xray_config, config_file, indent=2)
         return demux_servers
@@ -387,7 +387,9 @@ def main():
                 errors='replace'
             )
 
-        tunnel_protocol = "http2" if is_termux else "auto"
+        # Quick Tunnels only need an outbound TCP connection and HTTP/2 avoids
+        # waiting for QUIC to fail or hit Linux's 208KB default UDP buffer cap.
+        tunnel_protocol = "http2" if RUN_MODE == "quick_tunnel" else "auto"
         print(f"[*] Launching Cloudflare Tunnel ({tunnel_protocol}) pointing to http://{CLOUDFLARE_TARGET_IP}:{CLOUDFLARE_TARGET_PORT}...")
         return subprocess.Popen(
             [CLF_BIN, "tunnel", "--protocol", tunnel_protocol, "--url", f"http://{CLOUDFLARE_TARGET_IP}:{CLOUDFLARE_TARGET_PORT}"],
@@ -490,13 +492,15 @@ def main():
         def add_link(sni, transport, label):
             params = f"type={'ws' if transport == 'websocket' else 'xhttp'}&encryption=none&security="
             xhttp_params = f"&mode={XHTTP_MODE}" if transport == "xhttp" else ""
-            link_name = urllib.parse.quote(f"{label} {'WS' if transport == 'websocket' else 'XHTTP'}", safe='')
+            tr_label = f"{label} {'WS' if transport == 'websocket' else 'XHTTP'}"
             if PORT_MODE in ("443", "both"):
                 tls_params = f"tls&path={encoded_path}&host={tunnel_host_info}&sni={tunnel_host_info}{xhttp_params}"
                 if transport == "xhttp": tls_params += "&alpn=h3%2Ch2"
-                payloads.append(f"vless://{uuid_str}@{sni}:443?{params}{tls_params}#{link_name}")
+                link_name_443 = urllib.parse.quote(f"{tr_label} 443", safe='')
+                payloads.append(f"vless://{uuid_str}@{sni}:443?{params}{tls_params}#{link_name_443}")
             if PORT_MODE in ("80", "both") and RUN_MODE != "direct":
-                payloads.append(f"vless://{uuid_str}@{sni}:80?{params}&path={encoded_path}&host={tunnel_host_info}{xhttp_params}#{link_name}")
+                link_name_80 = urllib.parse.quote(f"{tr_label} 80", safe='')
+                payloads.append(f"vless://{uuid_str}@{sni}:80?{params}&path={encoded_path}&host={tunnel_host_info}{xhttp_params}#{link_name_80}")
 
         for sni_entry in fake_sni.split(","):
             sni_entry = sni_entry.strip()
