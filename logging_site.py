@@ -896,18 +896,27 @@ class RealtimeLogger:
         dl_lock = threading.Lock()
 
         def dl_worker():
-            url = "https://speed.cloudflare.com/__down?bytes=100000000"
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            while time.perf_counter() < stop_dl:
-                try:
-                    with urllib.request.urlopen(req, timeout=4) as r:
-                        while time.perf_counter() < stop_dl:
-                            chunk = r.read(1048576)
-                            if not chunk:
-                                break
-                            with dl_lock:
-                                dl_bytes[0] += len(chunk)
-                except Exception:
+            urls = [
+                "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb",
+                "https://speed.cloudflare.com/__down?bytes=100000000"
+            ]
+            for url in urls:
+                req = urllib.request.Request(url, headers={
+                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+                    "Referer": "https://speed.cloudflare.com/"
+                })
+                while time.perf_counter() < stop_dl:
+                    try:
+                        with urllib.request.urlopen(req, timeout=3) as r:
+                            while time.perf_counter() < stop_dl:
+                                chunk = r.read(1048576)
+                                if not chunk:
+                                    break
+                                with dl_lock:
+                                    dl_bytes[0] += len(chunk)
+                    except Exception:
+                        break
+                if dl_bytes[0] > 0:
                     break
 
         t_start_dl = time.perf_counter()

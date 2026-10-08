@@ -188,9 +188,9 @@ def main():
             print(f"[!] Unknown RUN_MODE '{RUN_MODE}', falling back to 'quick_tunnel'.")
             RUN_MODE = "quick_tunnel"
 
-        # On Railway in Quick/Named Tunnel mode, keep Xray on internal 127.0.0.1:8888
-        # so Railway's injected PORT can be used by the Web Dashboard without port conflict.
-        if RUN_MODE in ("quick_tunnel", "named_tunnel") and RAILWAY_WEB_PORT and PORT_ENV == RAILWAY_WEB_PORT:
+        # In Quick/Named Tunnel mode, always keep Xray on internal 127.0.0.1:8888
+        # so Railway or Ubuntu VNC's injected PORT (6080/8080/9999) never conflicts with Xray.
+        if RUN_MODE in ("quick_tunnel", "named_tunnel"):
             PORT_ENV = os.getenv("XRAY_PORT", "127.0.0.1:8888")
 
         def wait_for_config_fix(err_msg):
@@ -379,28 +379,46 @@ def main():
 
         def write_configs():
             inbounds, demux_servers = [], []
-            need_demux = DUAL_TRANSPORT or (PROTOCOL == "both")
             for ip, port in inbound_ports:
-                if need_demux:
+                if DUAL_TRANSPORT:
                     routes = {}
                     if PROTOCOL in ("vless", "both"):
                         vless_ws_port = port + 10000
                         inbounds.append(make_inbound("127.0.0.1", vless_ws_port, "websocket", proto="vless", path_override=WS_PATH))
                         routes["vless_ws"] = vless_ws_port
-                        if DUAL_TRANSPORT:
-                            vless_xhttp_port = port + 20000
-                            inbounds.append(make_inbound("127.0.0.1", vless_xhttp_port, "xhttp", proto="vless", path_override=WS_PATH))
-                            routes["vless_xhttp"] = vless_xhttp_port
+                        vless_xhttp_port = port + 20000
+                        inbounds.append(make_inbound("127.0.0.1", vless_xhttp_port, "xhttp", proto="vless", path_override=WS_PATH))
+                        routes["vless_xhttp"] = vless_xhttp_port
                     if PROTOCOL in ("vmess", "both"):
                         vmess_ws_port = port + 11000
                         vmess_path = "/vmess" if PROTOCOL == "both" else WS_PATH
                         inbounds.append(make_inbound("127.0.0.1", vmess_ws_port, "websocket", proto="vmess", path_override=vmess_path))
                         routes["vmess_ws"] = vmess_ws_port
                     demux_servers.append((ip, port, routes))
+                elif PROTOCOL == "both":
+                    # Chay song song VLESS + VMess bang native fallbacks cua Xray-core (Go 100%, khong qua Python proxy)
+                    vless_ws_port = port + 10000
+                    vmess_ws_port = port + 11000
+                    inbounds.append({
+                        "port": port,
+                        "listen": ip,
+                        "protocol": "vless",
+                        "settings": {
+                            "clients": [{"id": UUID, "level": 0}],
+                            "decryption": "none",
+                            "fallbacks": [
+                                {"path": WS_PATH, "dest": vless_ws_port},
+                                {"path": "/vmess", "dest": vmess_ws_port}
+                            ]
+                        },
+                        "streamSettings": {"network": "tcp", "security": "none"}
+                    })
+                    inbounds.append(make_inbound("127.0.0.1", vless_ws_port, "websocket", proto="vless", path_override=WS_PATH))
+                    inbounds.append(make_inbound("127.0.0.1", vmess_ws_port, "websocket", proto="vmess", path_override="/vmess"))
                 else:
                     inbounds.append(make_inbound(ip, port, TRANSPORTS[0], proto=PROTOCOL, path_override=WS_PATH))
             xray_config = {
-                "log": {"loglevel": "warning"},
+                "log": {"loglevel": "error", "access": "none"},
                 "inbounds": inbounds,
                 "outbounds": [{"protocol": "freedom", "settings": {"domainStrategy": "UseIPv4"}}]
             }

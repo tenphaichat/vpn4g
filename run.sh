@@ -644,7 +644,7 @@ auto_quick_mode(){
     header "Quick Tunnel (Auto Mode 1 - Railway)"
     load_existing
     RUN_MODE="quick_tunnel"
-    PORT="${PORT:-$DEF_PORT_QUICK}"
+    PORT="$DEF_PORT_QUICK"
     FAKE_SNI="${FAKE_SNI:-$DEF_FAKE_SNI}"
     WS_PATH="$DEF_WS_PATH"
     WS_HOST="$DEF_WS_HOST"
