@@ -182,7 +182,8 @@ if [ -f "$SRC_DIR/main.py" ] && [ -f "$SRC_DIR/run.sh" ] && [ "$SRC_DIR" != "$IN
 elif [ -d "$INSTALL_DIR/.git" ]; then
     echo -e " ${GREEN}[OK]${NC} Found existing install at $INSTALL_DIR"
     cd "$INSTALL_DIR"
-    git pull --ff-only 2>/dev/null || true
+    git fetch --all -q 2>/dev/null || true
+    git reset --hard origin/main -q 2>/dev/null || git pull --ff-only 2>/dev/null || true
 elif [ -f "$INSTALL_DIR/main.py" ] && [ -f "$INSTALL_DIR/run.sh" ]; then
     echo -e " ${GREEN}[OK]${NC} Found existing install at $INSTALL_DIR"
     cd "$INSTALL_DIR"
