@@ -808,7 +808,8 @@ case "${1:-}" in
         exit $?
         ;;
     --restart)
-        svc_restart
+        rm -f "$SCRIPT_DIR/frp_info.config"
+        svc_restart && wait_and_show_links
         exit $?
         ;;
     --status)

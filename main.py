@@ -319,10 +319,13 @@ def main():
                 inbounds.extend([make_inbound("127.0.0.1", ws_port, "websocket"), make_inbound("127.0.0.1", xhttp_port, "xhttp")])
                 demux_servers.append((ip, port, ws_port, xhttp_port))
             else: inbounds.append(make_inbound(ip, port, TRANSPORTS[0]))
-        xray_config = {"log": {"loglevel": "warning"}, "inbounds": inbounds, "outbounds": [{"protocol": "freedom", "settings": {"domainStrategy": "UseIPv4"}}]}
+        xray_config = {"log": {"loglevel": "debug"}, "inbounds": inbounds, "outbounds": [{"protocol": "freedom", "settings": {"domainStrategy": "UseIPv4"}}]}
         if ENABLE_WARP and wgcf_outbound: xray_config["outbounds"].insert(0, wgcf_outbound)
         with open("config.json", "w", encoding="utf-8") as config_file: json.dump(xray_config, config_file, indent=2)
         return demux_servers
+    if os.path.exists("frp_info.config"):
+        try: os.remove("frp_info.config")
+        except OSError: pass
     demux_intents = write_configs()
     print("[*] Launching XRAY with configured transport inbounds...")
     xp = subprocess.Popen([XRAY_BIN, "run", "-c", "config.json"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
@@ -384,9 +387,7 @@ def main():
                 errors='replace'
             )
 
-        # Quick Tunnels only need an outbound TCP connection and HTTP/2 avoids
-        # waiting for QUIC to fail on hosts or networks that block UDP.
-        tunnel_protocol = "http2" if RUN_MODE == "quick_tunnel" else "auto"
+        tunnel_protocol = "http2" if is_termux else "auto"
         print(f"[*] Launching Cloudflare Tunnel ({tunnel_protocol}) pointing to http://{CLOUDFLARE_TARGET_IP}:{CLOUDFLARE_TARGET_PORT}...")
         return subprocess.Popen(
             [CLF_BIN, "tunnel", "--protocol", tunnel_protocol, "--url", f"http://{CLOUDFLARE_TARGET_IP}:{CLOUDFLARE_TARGET_PORT}"],
