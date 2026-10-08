@@ -46,9 +46,14 @@ def main():
     # =========================================
     # CONFIG SERVER (Cloudflare Tunnel)
     # =========================================
+    raw_init_token = (os.getenv("TUNNEL_TOKEN") or "").strip()
+    init_token_match = re.search(r"eyJ[A-Za-z0-9_\-=]+", raw_init_token)
+    clean_init_token = init_token_match.group(0) if init_token_match else raw_init_token
+    default_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, clean_init_token)) if clean_init_token else str(uuid.uuid4())
+
     default_configs = {
         "PORT": "127.0.0.1:8888",
-        "XRAY_UUID": str(uuid.uuid4()),
+        "XRAY_UUID": default_uuid,
         "FAKE_SNI": "api24-normal-alisg.tiktokv.com#FreeTiktok,172.67.168.158#FreeVina Ko Nen",
         "WS_PATH": "/vless",
         "WS_HOST": "trycloudflare.com",
@@ -627,10 +632,12 @@ def main():
                             logger_push(clean_line.strip(), "CLOUDFLARE")
 
                             if RUN_MODE == "named_tunnel":
-                                if published_link_host != WS_HOST and re.search(r"[Rr]egistered tunnel connection", clean_line):
-                                    cloudflare_url = WS_HOST
-                                    print_vless_links(cloudflare_url, UUID, FAKE_SNI, WS_PATH)
-                                    published_link_host = cloudflare_url
+                                if re.search(r"[Rr]egistered tunnel connection", clean_line):
+                                    logger_push(f"Đã kết nối thành công replica vào Cloudflare Named Tunnel ({WS_HOST})!", "SUCCESS")
+                                    if published_link_host != WS_HOST:
+                                        cloudflare_url = WS_HOST
+                                        print_vless_links(cloudflare_url, UUID, FAKE_SNI, WS_PATH)
+                                        published_link_host = cloudflare_url
                                 continue
 
                             match = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", clean_line)
@@ -650,10 +657,12 @@ def main():
             if clp is not None:
                 threading.Thread(target=monitor_cloudflare, args=(clp.stdout,), daemon=True).start()
 
-            if RUN_MODE == "direct":
+            if RUN_MODE in ("direct", "named_tunnel"):
                 cloudflare_url = WS_HOST
-                print("[!] Recommended: restrict origin port 80 to Cloudflare IP ranges only.")
+                if RUN_MODE == "direct":
+                    print("[!] Recommended: restrict origin port 80 to Cloudflare IP ranges only.")
                 print_vless_links(cloudflare_url, UUID, FAKE_SNI, WS_PATH)
+                published_link_host = cloudflare_url
 
             while not reload_event.is_set() and not stop_program:
                 if tunnel_refresh_event.is_set():

@@ -210,7 +210,14 @@ LOGGING_HTML_TEMPLATE = """
             2. Sao chép <b>Tunnel Token</b> (dạng <code>eyJhIjoi...</code> — bạn có thể dán cả câu lệnh <code>cloudflared service install eyJ...</code>, hệ thống sẽ tự lọc lấy token).<br>
             3. Sang tab <b>Public Hostname</b> &rarr; <b>Add a public hostname</b>:<br>
             &nbsp;&nbsp;&bull; <b>Domain / Subdomain</b>: Ví dụ <code>vless.tenmien.com</code> (nhập đúng tên miền này vào ô <b>Domain</b> ở Bước 1 bên dưới).<br>
-            &nbsp;&nbsp;&bull; <b>Service Type</b>: Chọn <code>HTTP</code> &nbsp;|&nbsp; <b>URL</b>: Nhập chính xác <code>127.0.0.1:8888</code>.
+            &nbsp;&nbsp;&bull; <b>Service Type</b>: Chọn <code>HTTP</code> &nbsp;|&nbsp; <b>URL</b>: Nhập chính xác <code>127.0.0.1:8888</code>.<br>
+            <div style="margin-top:8px; padding-top:8px; border-top:1px dashed #334155; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+                <span style="color:#7dd3fc; font-size:12px;">⚡ <b>Chạy gộp nhiều Acc Railway (Cluster HA):</b> Thiết lập ở Acc 1 xong bấm <b>Copy Mã Cluster</b>, sang Acc 2, 3 bấm <b>Dán &amp; Chạy Cluster</b> là tự đồng bộ 100% (Domain + Token + UUID + WebSocket)!</span>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                    <button class="btn" type="button" onclick="copyClusterCode(this)">📋 Copy Mã Cluster (Từ Acc 1)</button>
+                    <button class="btn btn-green" type="button" onclick="pasteClusterCode()">📥 Dán &amp; Chạy Cluster (Acc 2, 3...)</button>
+                </div>
+            </div>
         </div>
 
         <div id="guide-direct" class="guide-box m3" style="display:none;">
@@ -347,8 +354,9 @@ LOGGING_HTML_TEMPLATE = """
                 </div>
                 <div class="form-group">
                     <label>UUID Kết Nối (XRAY_UUID)</label>
-                    <div style="display:flex; gap:6px;">
-                        <input class="form-control" id="cfg-XRAY_UUID" />
+                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                        <input class="form-control" id="cfg-XRAY_UUID" style="flex:1; min-width:180px;" />
+                        <button class="btn" type="button" onclick="syncUuidFromToken()" title="Tạo UUID cố định từ Tunnel Token để nhiều Acc Railway luôn trùng UUID">🔗 Theo Token</button>
                         <button class="btn" type="button" onclick="randomizeUuidInput()">🎲 Random</button>
                     </div>
                 </div>
@@ -424,6 +432,75 @@ LOGGING_HTML_TEMPLATE = """
             } else {
                 const s4 = () => Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1);
                 document.getElementById("cfg-XRAY_UUID").value = `${s4()}${s4()}-${s4()}-4${s4().substr(0,3)}-${s4()}-${s4()}${s4()}${s4()}`;
+            }
+        }
+
+        async function syncUuidFromToken() {
+            const token = extractTunnelToken(document.getElementById("cfg-TUNNEL_TOKEN").value);
+            if (!token) {
+                alert("⚠️ Hãy dán Cloudflare Tunnel Token vào ô ở Bước 1 trước!");
+                document.getElementById("cfg-TUNNEL_TOKEN").focus();
+                return;
+            }
+            if (window.crypto && window.crypto.subtle) {
+                const buf = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode("vpn4g-cluster:" + token));
+                const b = Array.from(new Uint8Array(buf)).slice(0, 16);
+                b[6] = (b[6] & 0x0f) | 0x50;
+                b[8] = (b[8] & 0x3f) | 0x80;
+                const h = b.map(x => x.toString(16).padStart(2, "0")).join("");
+                document.getElementById("cfg-XRAY_UUID").value = `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20,32)}`;
+                showToast("🔗 Đã tạo UUID cố định theo Tunnel Token!");
+            }
+        }
+
+        function copyClusterCode(btn) {
+            const customDomain = cleanDomain(document.getElementById("cfg-CUSTOM_DOMAIN").value);
+            const tunnelToken = extractTunnelToken(document.getElementById("cfg-TUNNEL_TOKEN").value);
+            const uuid = document.getElementById("cfg-XRAY_UUID").value.trim();
+            if (!customDomain || !tunnelToken || !uuid) {
+                alert("⚠️ Hãy điền đầy đủ Domain, Tunnel Token và UUID trên Acc 1 trước khi Copy Mã Cluster!");
+                return;
+            }
+            const clusterObj = {
+                d: customDomain,
+                t: tunnelToken,
+                u: uuid,
+                p: document.getElementById("cfg-PROTOCOL").value || "vless",
+                pm: document.getElementById("cfg-PORT_MODE").value || "both",
+                wp: document.getElementById("cfg-WS_PATH").value.trim() || "/vless",
+                sni: document.getElementById("cfg-FAKE_SNI").value.trim() || SNI_BOTH
+            };
+            const code = "CLUSTER:" + btoa(unescape(encodeURIComponent(JSON.stringify(clusterObj))));
+            copyText(code, btn);
+            showToast("📋 Đã copy Mã Cluster! Hãy sang Acc Railway 2, 3 và bấm '📥 Dán & Chạy Cluster'");
+        }
+
+        async function pasteClusterCode() {
+            let raw = "";
+            try {
+                raw = (await navigator.clipboard.readText() || "").trim();
+            } catch (e) {}
+            if (!raw || !raw.startsWith("CLUSTER:")) {
+                raw = (prompt("Dán Mã Cluster (bắt đầu bằng CLUSTER:...) đã copy từ Acc 1 vào đây:") || "").trim();
+            }
+            if (!raw) return;
+            try {
+                const b64 = raw.replace(/^CLUSTER:/, "").trim();
+                const obj = JSON.parse(decodeURIComponent(escape(atob(b64))));
+                selectMode("named_tunnel");
+                document.getElementById("cfg-CUSTOM_DOMAIN").value = obj.d || "";
+                document.getElementById("cfg-TUNNEL_TOKEN").value = obj.t || "";
+                document.getElementById("cfg-XRAY_UUID").value = obj.u || "";
+                document.getElementById("cfg-PROTOCOL").value = obj.p || "vless";
+                document.getElementById("cfg-PORT_MODE").value = obj.pm || "both";
+                document.getElementById("cfg-TRANSPORT").value = "websocket";
+                updateXhttpVisibility();
+                document.getElementById("cfg-WS_PATH").value = obj.wp || "/vless";
+                document.getElementById("cfg-FAKE_SNI").value = obj.sni || SNI_BOTH;
+                syncSniPresetDropdown(document.getElementById("cfg-FAKE_SNI").value);
+                await saveConfig();
+            } catch (e) {
+                alert("❌ Mã Cluster không hợp lệ! Hãy bấm '📋 Copy Mã Cluster' từ Acc 1 rồi thử lại.");
             }
         }
 
