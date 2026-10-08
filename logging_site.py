@@ -382,20 +382,40 @@ class RealtimeLogger:
         return WebHandler
 
     def start(self):
-        """Khởi chạy server trong một thread riêng"""
+        """Khởi chạy server trong một thread riêng (tự động mở thêm port 9999 và 8080 làm dự phòng cho Railway)"""
         if self.server:
             return f"http://localhost:{self.port}"
 
+        handler_cls = self._create_handler()
+
         def run_server():
-            self.server = ThreadingHTTPServer(("0.0.0.0", self.port), self._create_handler())
+            self.server = ThreadingHTTPServer(("0.0.0.0", self.port), handler_cls)
             self.server.serve_forever()
 
         self.server_thread = threading.Thread(target=run_server, daemon=True)
         self.server_thread.start()
+
+        self.extra_servers = []
+        for extra_port in (9999, 8080):
+            if extra_port != self.port:
+                try:
+                    extra_srv = ThreadingHTTPServer(("0.0.0.0", extra_port), handler_cls)
+                    threading.Thread(target=extra_srv.serve_forever, daemon=True).start()
+                    self.extra_servers.append(extra_srv)
+                except Exception:
+                    pass
+
         return f"http://localhost:{self.port}"
 
     def stop(self):
         """Dừng server"""
+        for extra_srv in getattr(self, "extra_servers", []):
+            try:
+                extra_srv.shutdown()
+                extra_srv.server_close()
+            except Exception:
+                pass
+        self.extra_servers = []
         if self.server:
             self.server.shutdown()
             self.server.server_close()
