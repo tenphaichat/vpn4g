@@ -1,0 +1,94 @@
+import os
+import platform
+import zipfile
+import requests
+import shutil
+
+XRAY_VERSION = "v26.7.11"
+
+BASE_URL = f"https://github.com/XTLS/Xray-core/releases/download/{XRAY_VERSION}"
+
+def is_termux():
+    return bool(os.getenv("TERMUX_VERSION")) or "com.termux" in os.getenv("PREFIX", "")
+
+def get_os_name():
+    sys = platform.system().lower()
+    arch = platform.machine().lower()
+
+    # Termux reports Linux, but needs the Android Xray release.
+    if is_termux():
+        sys = "android"
+
+    if sys == "windows":
+        if arch in ["x86_64", "amd64", "x64"]:
+            return "windows-64.zip", "xray.exe"
+
+    if sys == "linux":
+        if arch in ["aarch64", "arm64"]:
+            return "linux-arm64.zip", "xray"
+        if arch in ["x86_64", "amd64", "x64"]:
+            return "linux-64.zip", "xray"
+
+    if sys == "android":
+        if arch in ["aarch64", "arm64"]:
+            return "android-arm64-v8a.zip", "xray"
+        if arch in ["armv7l", "arm"]:
+            return "android-arm32-v7a.zip", "xray"
+        if arch in ["x86_64", "amd64", "x64"]:
+            return "android-amd64.zip", "xray"
+
+    if sys == "darwin": # macOS
+        if arch in ["aarch64", "arm64"]:
+            return "macos-arm64-v8a.zip", "xray"
+        if arch in ["x86_64", "amd64", "x64"]:
+            return "macos-64.zip", "xray"
+
+    raise Exception(f"OS {sys} {arch} not supported.")
+
+def download_file(url, filename):
+    print(f"Downloading: {url}")
+
+    r = requests.get(url, stream=True)
+
+    r.raise_for_status()
+
+    with open(filename, "wb") as f:
+        for chunk in r.iter_content(chunk_size=8192):
+            f.write(chunk)
+
+def install_xray():
+    archive_name, binary_name = get_os_name()
+
+    url = f"{BASE_URL}/Xray-{archive_name}"
+
+    zip_path = "xray.zip"
+
+    download_file(url, zip_path)
+
+    extract_dir = "xray_bin"
+
+    if os.path.exists(extract_dir):
+        shutil.rmtree(extract_dir)
+
+    os.makedirs(extract_dir, exist_ok=True)
+
+    with zipfile.ZipFile(zip_path, "r") as zip_ref:
+        zip_ref.extractall(extract_dir)
+
+    os.remove(zip_path)
+
+    # move binary ra root
+    src = os.path.join(extract_dir, binary_name)
+
+    dst = os.path.join(".", binary_name)
+
+    shutil.move(src, dst)
+
+    # Archives do not reliably preserve the executable bit on Android/Termux.
+    if os.name != "nt":
+        os.chmod(dst, 0o755)
+
+    print("Xray installed at:", dst)
+
+if __name__ == "__main__":
+    install_xray()

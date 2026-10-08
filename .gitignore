@@ -1,0 +1,30 @@
+# Local configuration and generated output
+/.env
+/config.json
+/config.yml
+/frpc.toml
+/frp_info.config
+/frp_info.json
+/wgcf.json
+/wgcf.xray.json
+*.log
+
+# Downloaded runtimes and archives
+/xray
+/cloudflared
+/wgcf-cli
+*.exe
+/xray.zip
+/cloudflared_temp.archive
+/wgcf-cli.tar.zstd
+/xray_bin/
+/wgcf_bin/
+
+# Python and editor state
+__pycache__/
+*.py[cod]
+/.venv/
+/.vscode/
+/.idea/
+.DS_Store
+Thumbs.db
