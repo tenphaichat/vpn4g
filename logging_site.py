@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import uuid
 import base64
@@ -21,6 +22,7 @@ DEFAULT_ENV_CONFIG = {
     "FAKE_SNI": "api24-normal-alisg.tiktokv.com#FreeTiktok,172.67.168.158#FreeVina Ko Nen",
     "WS_PATH": "/vless",
     "WS_HOST": "trycloudflare.com",
+    "CUSTOM_DOMAIN": "",
     "TUNNEL_TOKEN": "",
     "COUNTRY_CODE": "",
     "ENABLE_WARP": "false",
@@ -38,7 +40,7 @@ LOGGING_HTML_TEMPLATE = """
     <style>
         * { box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #0f172a; color: #e2e8f0; margin: 0; padding: 16px; }
-        .card { background: #1e293b; padding: 1.25rem 1.5rem; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.4); max-width: 1000px; margin: 0 auto 18px auto; display: flex; flex-direction: column; border: 1px solid #334155; }
+        .card { background: #1e293b; padding: 1.25rem 1.5rem; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.4); max-width: 1020px; margin: 0 auto 18px auto; display: flex; flex-direction: column; border: 1px solid #334155; }
         h2 { margin-top: 0; border-bottom: 1px solid #334155; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; color: #f8fafc; font-size: 1.15rem; flex-wrap: wrap; gap: 8px; }
         .badge { font-size: 12px; color: #4ade80; background: rgba(74, 222, 128, 0.12); padding: 4px 10px; border-radius: 999px; font-weight: 600; }
         .badge-warn { font-size: 13px; color: #fbbf24; background: rgba(251, 191, 36, 0.15); padding: 8px 12px; border-radius: 8px; margin-bottom: 10px; border: 1px solid rgba(251, 191, 36, 0.4); }
@@ -47,7 +49,7 @@ LOGGING_HTML_TEMPLATE = """
         .proto-vmess { background: rgba(168, 85, 247, 0.18); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); }
         .sub-box { background: #0f172a; border: 1px solid #0284c7; border-radius: 8px; padding: 12px; margin-bottom: 14px; }
         .sub-title { font-size: 13px; font-weight: 600; color: #38bdf8; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; }
-        .sub-hint { font-size: 11.5px; color: #94a3b8; margin-top: 6px; }
+        .sub-hint { font-size: 11.5px; color: #94a3b8; margin-top: 6px; line-height: 1.45; }
         .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
         .link-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
         .link-input { flex: 1; background: #0f172a; color: #38bdf8; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; font-family: monospace; font-size: 12px; min-width: 0; }
@@ -64,20 +66,42 @@ LOGGING_HTML_TEMPLATE = """
         .speed-box { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 12px; text-align: center; }
         .speed-label { font-size: 12px; color: #94a3b8; margin-bottom: 4px; }
         .speed-val { font-size: 20px; font-weight: 700; color: #38bdf8; font-family: monospace; }
-        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+
+        /* Mode Tabs */
+        .mode-tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 16px; }
+        .mode-tab { background: #0f172a; border: 2px solid #334155; border-radius: 10px; padding: 12px 14px; cursor: pointer; text-align: left; transition: 0.15s; color: #cbd5e1; }
+        .mode-tab:hover { border-color: #64748b; }
+        .mode-tab.active-m1 { border-color: #10b981; background: rgba(16, 185, 129, 0.1); }
+        .mode-tab.active-m2 { border-color: #38bdf8; background: rgba(56, 189, 248, 0.1); }
+        .mode-tab.active-m3 { border-color: #a855f7; background: rgba(168, 85, 247, 0.1); }
+        .mode-tab-title { font-size: 14px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; }
+        .mode-tab-sub { font-size: 11.5px; color: #94a3b8; line-height: 1.35; }
+
+        .guide-box { background: #0f172a; border-left: 4px solid #38bdf8; border-radius: 6px; padding: 12px 14px; margin-bottom: 16px; font-size: 12.5px; line-height: 1.55; color: #cbd5e1; }
+        .guide-box.m1 { border-left-color: #10b981; }
+        .guide-box.m2 { border-left-color: #38bdf8; }
+        .guide-box.m3 { border-left-color: #a855f7; }
+        .guide-box code { background: #1e293b; color: #fde047; padding: 2px 6px; border-radius: 4px; font-family: monospace; }
+
+        .step-box { background: rgba(15, 23, 42, 0.55); border: 1px solid #334155; border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
+        .step-header { font-size: 13px; font-weight: 700; color: #38bdf8; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+        .step-num { background: #0284c7; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
         .form-group { display: flex; flex-direction: column; gap: 5px; }
         .form-group.full { grid-column: 1 / -1; }
         .form-group label { font-size: 12px; color: #cbd5e1; font-weight: 600; }
-        .form-control { background: #0f172a; color: #f8fafc; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; font-size: 13px; font-family: inherit; }
+        .form-control { background: #0f172a; color: #f8fafc; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; font-size: 13px; font-family: inherit; width: 100%; }
         .form-control:focus { outline: none; border-color: #38bdf8; }
-        .mode-help { font-size: 12px; color: #94a3b8; background: #0f172a; border-left: 3px solid #38bdf8; padding: 8px 12px; border-radius: 4px; margin-bottom: 12px; }
+        .field-hint { font-size: 11px; color: #94a3b8; }
+
         #log-container { background: #090d16; color: #cbd5e1; padding: 14px; border-radius: 8px; overflow-y: auto; font-family: monospace; font-size: 12px; height: 340px; border: 1px solid #334155; }
         .log-entry { margin-bottom: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 2px; word-break: break-all; }
         .timestamp { color: #64748b; margin-right: 8px; }
         .type-info { color: #38bdf8; font-weight: bold; }
         .type-error { color: #f87171; font-weight: bold; }
         .type-success { color: #4ade80; font-weight: bold; }
-        .status-toast { font-size: 12.5px; color: #4ade80; font-weight: 600; margin-left: 8px; }
+        .status-toast { font-size: 12.5px; color: #4ade80; font-weight: 600; }
     </style>
 </head>
 <body>
@@ -125,7 +149,7 @@ LOGGING_HTML_TEMPLATE = """
                 <button class="btn" onclick="window.open(document.getElementById('sub-url-input').value + '?raw=1', '_blank')">Xem Raw</button>
             </div>
             <div class="sub-hint">
-                💡 Chỉ cần thêm <b>Link Sub</b> này vào app VPN 1 lần duy nhất. Khi đổi Tunnel mới hoặc tạo VMess/VLESS mới, bạn chỉ cần bấm <b>"Cập nhật Sub (Update Subscription)"</b> trên app là tự lấy toàn bộ link mới!
+                💡 Dán <b>Link Sub</b> này vào app VPN 1 lần duy nhất. Khi đổi Tunnel mới hoặc tạo VMess/VLESS mới, bạn chỉ cần bấm <b>"Cập nhật Sub (Update Subscription)"</b> trên app là tự động lấy toàn bộ link mới!
             </div>
         </div>
 
@@ -139,102 +163,215 @@ LOGGING_HTML_TEMPLATE = """
         <div id="links-container">Đang khởi tạo và lấy danh sách link...</div>
     </div>
 
-    <!-- CARD 3: XRAY SETTINGS & MODE 1-2-3 -->
+    <!-- CARD 3: STEP-BY-STEP WIZARD CHO MODE 1 - MODE 2 - MODE 3 -->
     <div class="card">
         <h2>
-            <span>⚙️ Cài Đặt Xray & Chế Độ Chạy (Mode 1 - 2 - 3)</span>
-            <button class="btn btn-green" onclick="saveConfig()" id="save-cfg-btn">💾 Lưu Cấu Hình & Khởi Động Lại Xray</button>
+            <span>⚙️ Cài Đặt Xray Theo Từng Chế Độ (Mode 1 - Mode 2 - Mode 3)</span>
+            <span id="current-mode-badge" class="badge">Đang tải...</span>
         </h2>
 
-        <div id="mode-desc" class="mode-help"></div>
-
-        <div class="form-grid">
-            <div class="form-group">
-                <label>Chế độ chạy (RUN_MODE)</label>
-                <select class="form-control" id="cfg-RUN_MODE" onchange="updateModeUI()">
-                    <option value="quick_tunnel">Mode 1: Quick Tunnel (trycloudflare.com - Không cần domain)</option>
-                    <option value="named_tunnel">Mode 2: Named Tunnel (Domain cố định + Cloudflare Token)</option>
-                    <option value="direct">Mode 3: Direct Mode (Trỏ IP trực tiếp qua Cloudflare Port 80)</option>
-                </select>
+        <!-- 3 TAB CHỌN MODE -->
+        <div class="mode-tabs">
+            <div class="mode-tab" id="tab-quick_tunnel" onclick="selectMode('quick_tunnel')">
+                <div class="mode-tab-title">
+                    <span>1️⃣ Mode 1: Quick Tunnel</span>
+                    <span style="font-size:11px; color:#10b981;">Khuyên dùng</span>
+                </div>
+                <div class="mode-tab-sub">Không cần domain. Tự cấp <code>*.trycloudflare.com</code>. Chạy tốt trên cả Railway & Ubuntu VPS.</div>
             </div>
 
-            <div class="form-group">
-                <label>Giao thức xuất link (PROTOCOL)</label>
-                <select class="form-control" id="cfg-PROTOCOL">
-                    <option value="both">Cả VLESS + VMess (Song song cả 2 loại link)</option>
-                    <option value="vless">Chỉ VLESS (Nhẹ & tốc độ tối đa)</option>
-                    <option value="vmess">Chỉ VMess (Chuẩn vmess:// V2Ray)</option>
-                </select>
+            <div class="mode-tab" id="tab-named_tunnel" onclick="selectMode('named_tunnel')">
+                <div class="mode-tab-title">
+                    <span>2️⃣ Mode 2: Named Tunnel</span>
+                    <span style="font-size:11px; color:#38bdf8;">Domain cố định</span>
+                </div>
+                <div class="mode-tab-sub">Dùng Domain riêng + Cloudflare Zero Trust Token. Link cố định vĩnh viễn, hỗ trợ cả xHTTP.</div>
             </div>
 
-            <div class="form-group">
-                <label>Chế độ Cổng xuất link (PORT_MODE)</label>
-                <select class="form-control" id="cfg-PORT_MODE">
-                    <option value="both">Cả Port 443 (TLS) & Port 80 (Non-TLS)</option>
-                    <option value="443">Chỉ Port 443 (TLS)</option>
-                    <option value="80">Chỉ Port 80 (Non-TLS)</option>
-                </select>
+            <div class="mode-tab" id="tab-direct" onclick="selectMode('direct')">
+                <div class="mode-tab-title">
+                    <span>3️⃣ Mode 3: Direct Cloudflare</span>
+                    <span style="font-size:11px; color:#c084fc;">Chỉ VPS có IP riêng</span>
+                </div>
+                <div class="mode-tab-sub">Không dùng <code>cloudflared</code>. Cloudflare DNS Proxy trỏ thẳng về Port 80 của VPS.</div>
             </div>
+        </div>
 
-            <div class="form-group">
-                <label>Truyền tải (TRANSPORT)</label>
-                <select class="form-control" id="cfg-TRANSPORT">
-                    <option value="websocket">WebSocket (WS - Ổn định nhất)</option>
-                    <option value="xhttp">xHTTP (SplitHTTP)</option>
-                    <option value="websocket,xhttp">Cả WebSocket + xHTTP</option>
-                </select>
+        <!-- HƯỚNG DẪN SETUP TƯƠNG ỨNG TỪNG MODE -->
+        <div id="guide-quick_tunnel" class="guide-box m1" style="display:none;">
+            <b>🟢 Quy trình Mode 1 (Quick Tunnel - 4 bước chuẩn <code>run.sh</code>):</b><br>
+            • Không cần mua tên miền hay cấu hình Cloudflare. Hệ thống tự tạo kết nối HTTP/2 tốc độ cao tới Cloudflare.<br>
+            • Transport tự động tối ưu ở <code>WebSocket</code> (do <code>trycloudflare.com</code> chỉ hỗ trợ WebSocket) và lắng nghe nội bộ tại <code>127.0.0.1:8888</code>.
+        </div>
+
+        <div id="guide-named_tunnel" class="guide-box m2" style="display:none;">
+            <b>🔵 Chuẩn bị trên Cloudflare Zero Trust trước khi bật Mode 2 (6 bước chuẩn <code>run.sh</code>):</b><br>
+            1. Mở <a href="https://one.dash.cloudflare.com/" target="_blank" style="color:#38bdf8;">Cloudflare Zero Trust</a> &rarr; <b>Networks</b> &rarr; <b>Tunnels</b> &rarr; <b>Create a tunnel</b> &rarr; chọn <b>Cloudflared</b>.<br>
+            2. Sao chép <b>Tunnel Token</b> (dạng <code>eyJhIjoi...</code> — bạn có thể dán cả câu lệnh <code>cloudflared service install eyJ...</code>, hệ thống sẽ tự lọc lấy token).<br>
+            3. Sang tab <b>Public Hostname</b> &rarr; <b>Add a public hostname</b>:<br>
+            &nbsp;&nbsp;&bull; <b>Domain / Subdomain</b>: Ví dụ <code>vless.tenmien.com</code> (nhập đúng tên miền này vào ô <b>Domain</b> ở Bước 1 bên dưới).<br>
+            &nbsp;&nbsp;&bull; <b>Service Type</b>: Chọn <code>HTTP</code> &nbsp;|&nbsp; <b>URL</b>: Nhập chính xác <code>127.0.0.1:8888</code>.
+        </div>
+
+        <div id="guide-direct" class="guide-box m3" style="display:none;">
+            <b>🟣 Chuẩn bị trên Cloudflare DNS trước khi bật Mode 3 (6 bước chuẩn <code>run.sh</code>):</b><br>
+            1. Vào Cloudflare DNS &rarr; tạo bản ghi <b>A</b> cho tên miền (VD: <code>vless.tenmien.com</code>) trỏ về IP Server: <code id="direct-ip-hint">Đang lấy IP...</code>, bật <b>Proxy ON (Đám mây cam 🟠)</b>.<br>
+            2. Vào mục <b>SSL/TLS &rarr; Overview</b> trên Cloudflare &rarr; đổi sang chế độ <code>Flexible</code>.<br>
+            3. Mở cổng TCP <code>80</code> trên tường lửa VPS.<br>
+            <span style="color:#fbbf24;">⚠️ Lưu ý: Mode 3 chỉ dùng cho <b>Ubuntu VPS</b> có IP riêng mở được port 80. Trên <b>Railway</b> không mở trực tiếp port 80 theo IP riêng được, hãy dùng <b>Mode 1</b> hoặc <b>Mode 2</b>!</span>
+        </div>
+
+        <input type="hidden" id="cfg-RUN_MODE" value="quick_tunnel" />
+
+        <!-- BƯỚC 1 (CHỈ HIỆN Ở MODE 2 & MODE 3): DOMAIN & TOKEN / ORIGIN PORT -->
+        <div class="step-box" id="step-domain-box" style="display:none;">
+            <div class="step-header">
+                <span class="step-num" id="lbl-step-domain">Bước 1/6</span>
+                <span id="title-step-domain">Cấu hình Tên miền (Domain) & Kết nối Cloudflare</span>
             </div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Tên miền của bạn (WS_HOST - Bắt buộc cho Mode 2 & 3)</label>
+                    <input class="form-control" id="cfg-CUSTOM_DOMAIN" placeholder="Ví dụ: vless.example.com" />
+                    <span class="field-hint">Chỉ nhập tên miền (VD: <code>vless.tenmien.com</code>), không kèm <code>https://</code></span>
+                </div>
 
-            <div class="form-group full">
-                <label>Danh sách Bug Host / SNI nền (FAKE_SNI - cách nhau bởi dấu phẩy, kèm #Tên)</label>
-                <input class="form-control" id="cfg-FAKE_SNI" placeholder="api24-normal-alisg.tiktokv.com#FreeTiktok,172.67.168.158#FreeVina Ko Nen" />
-            </div>
+                <!-- Chỉ hiện ở Mode 2 -->
+                <div class="form-group" id="grp-TUNNEL_TOKEN">
+                    <label>Cloudflare Tunnel Token (TUNNEL_TOKEN - Bắt buộc cho Mode 2)</label>
+                    <input class="form-control" id="cfg-TUNNEL_TOKEN" placeholder="Dán mã eyJhIjoi... hoặc lệnh cloudflared service install eyJ..." />
+                    <span class="field-hint">Tự động nhận diện mã <code>eyJ...</code> nếu bạn dán nguyên câu lệnh từ Cloudflare</span>
+                </div>
 
-            <div class="form-group">
-                <label>XRAY UUID (ID kết nối)</label>
-                <div style="display:flex; gap:6px;">
-                    <input class="form-control" style="flex:1;" id="cfg-XRAY_UUID" />
-                    <button class="btn" type="button" onclick="randomizeUuidInput()">🎲 Random</button>
+                <!-- Chỉ hiện ở Mode 3 -->
+                <div class="form-group" id="grp-DIRECT_PORT" style="display:none;">
+                    <label>Cổng lắng nghe trực tiếp trên VPS (Origin Listen Address:Port)</label>
+                    <input class="form-control" id="cfg-DIRECT_PORT" value="0.0.0.0:80" placeholder="0.0.0.0:80" />
+                    <span class="field-hint">Cloudflare Flexible SSL sẽ chuyển tiếp lưu lượng về cổng 80 này</span>
                 </div>
             </div>
+        </div>
 
-            <div class="form-group">
-                <label>Đường dẫn WebSocket (WS_PATH)</label>
-                <input class="form-control" id="cfg-WS_PATH" placeholder="/vless" />
+        <!-- BƯỚC TIẾP THEO: FAKE SNI -->
+        <div class="step-box">
+            <div class="step-header">
+                <span class="step-num" id="lbl-step-sni">Bước 1/4</span>
+                <span>Chọn Bug Host / Fake SNI nền</span>
             </div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Chọn nhanh gói SNI (Giống menu <code>run.sh</code>)</label>
+                    <select class="form-control" id="sni-preset" onchange="applySniPreset()">
+                        <option value="both">3. Cả FreeTiktok + FreeVina Ko Nen (Mặc định)</option>
+                        <option value="tiktok">1. Chỉ FreeTiktok (api24-normal-alisg.tiktokv.com)</option>
+                        <option value="vina">2. Chỉ FreeVina Ko Nen (172.67.168.158)</option>
+                        <option value="custom">4. Tùy chỉnh (Nhập danh sách SNI bên cạnh)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Giá trị FAKE_SNI (Cách nhau bởi dấu phẩy, kèm #Tên_Hiển_Thị)</label>
+                    <input class="form-control" id="cfg-FAKE_SNI" oninput="document.getElementById('sni-preset').value='custom'" />
+                </div>
+            </div>
+        </div>
 
-            <div class="form-group" id="grp-WS_HOST">
-                <label>Tên miền / WS_HOST (Dùng cho Mode 2 & Mode 3)</label>
-                <input class="form-control" id="cfg-WS_HOST" placeholder="trycloudflare.com hoặc sub.domain.com" />
+        <!-- BƯỚC TRANSPORT (CHỈ HIỆN Ở MODE 2 & MODE 3, MODE 1 TỰ ĐỘNG DÙNG WEBSOCKET) -->
+        <div class="step-box" id="step-transport-box" style="display:none;">
+            <div class="step-header">
+                <span class="step-num">Bước 3/6</span>
+                <span>Chọn Điểm Cuối Transport (WebSocket / xHTTP)</span>
             </div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Loại Transport (TRANSPORT)</label>
+                    <select class="form-control" id="cfg-TRANSPORT" onchange="updateXhttpVisibility()">
+                        <option value="websocket">1. WebSocket (Ổn định / Hỗ trợ mọi app client)</option>
+                        <option value="xhttp">2. xHTTP (Transport HTTP hiện đại)</option>
+                        <option value="websocket,xhttp">3. Cả WebSocket + xHTTP (Song song)</option>
+                    </select>
+                </div>
+                <div class="form-group" id="grp-XHTTP_MODE" style="display:none;">
+                    <label>Chế độ xHTTP (XHTTP_MODE)</label>
+                    <select class="form-control" id="cfg-XHTTP_MODE">
+                        <option value="packet-up">1. packet-up (Mặc định)</option>
+                        <option value="stream-up">2. stream-up</option>
+                        <option value="stream-one">3. stream-one</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Đường dẫn Endpoint (WS_PATH)</label>
+                    <input class="form-control" id="cfg-WS_PATH" value="/vless" placeholder="/vless" />
+                </div>
+            </div>
+        </div>
 
-            <div class="form-group" id="grp-TUNNEL_TOKEN">
-                <label>Cloudflare Tunnel Token (TUNNEL_TOKEN - Bắt buộc cho Mode 2)</label>
-                <input class="form-control" id="cfg-TUNNEL_TOKEN" placeholder="eyJhIjoi..." />
+        <!-- BƯỚC CHỌN PORT & GIAO THỨC VLESS / VMESS -->
+        <div class="step-box">
+            <div class="step-header">
+                <span class="step-num" id="lbl-step-port">Bước 2/4</span>
+                <span>Chọn Cổng Xuất Link (80 / 443) & Giao Thức (VLESS / VMess)</span>
             </div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Chế độ Cổng cho Link (PORT_MODE)</label>
+                    <select class="form-control" id="cfg-PORT_MODE">
+                        <option value="both">3. Cả Port 80 (Không TLS) + Port 443 (TLS) (Mặc định)</option>
+                        <option value="443">2. Chỉ Port 443 (TLS)</option>
+                        <option value="80">1. Chỉ Port 80 (Không TLS)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Giao thức tạo Link (PROTOCOL)</label>
+                    <select class="form-control" id="cfg-PROTOCOL">
+                        <option value="both">Cả VLESS (vless://) + VMess (vmess://)</option>
+                        <option value="vless">Chỉ VLESS (vless:// - Nhẹ & tốc độ cao nhất)</option>
+                        <option value="vmess">Chỉ VMess (vmess:// - Tương thích V2Ray cũ)</option>
+                    </select>
+                </div>
+            </div>
+        </div>
 
-            <div class="form-group">
-                <label>Cổng lắng nghe nội bộ Xray (PORT)</label>
-                <input class="form-control" id="cfg-PORT" placeholder="127.0.0.1:8888 (Mode 1/2) hoặc 0.0.0.0:80 (Mode 3)" />
+        <!-- BƯỚC VỊ TRÍ NODE & UUID -->
+        <div class="step-box">
+            <div class="step-header">
+                <span class="step-num" id="lbl-step-node">Bước 3/4</span>
+                <span>Vị Trí Node (Cờ Quốc Gia), UUID & Tuỳ Chọn Phụ</span>
             </div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Mã Quốc Gia 2 ký tự (COUNTRY_CODE - VD: SG, VN, US)</label>
+                    <div style="display:flex; gap:6px;">
+                        <input class="form-control" id="cfg-COUNTRY_CODE" placeholder="Để trống hoặc nhập SG, VN..." />
+                        <button class="btn" type="button" onclick="autoFillCountry()">📍 Tự lấy theo IP</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>UUID Kết Nối (XRAY_UUID)</label>
+                    <div style="display:flex; gap:6px;">
+                        <input class="form-control" id="cfg-XRAY_UUID" />
+                        <button class="btn" type="button" onclick="randomizeUuidInput()">🎲 Random</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Cloudflare WARP Outbound (ENABLE_WARP)</label>
+                    <select class="form-control" id="cfg-ENABLE_WARP">
+                        <option value="false">Tắt (Mặc định - Tốc độ tối đa)</option>
+                        <option value="true">Bật (Bọc lưu lượng ra qua Cloudflare WARP)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Webhook URL (Tùy chọn gửi thông báo khi có link mới)</label>
+                    <input class="form-control" id="cfg-WEBHOOK_URL" placeholder="https://discord.com/api/webhooks/..." />
+                </div>
+            </div>
+        </div>
 
-            <div class="form-group">
-                <label>Mã Quốc Gia hiển thị cờ (COUNTRY_CODE, VD: SG, VN)</label>
-                <input class="form-control" id="cfg-COUNTRY_CODE" placeholder="SG" />
-            </div>
-
-            <div class="form-group">
-                <label>Cloudflare WARP Outbound (ENABLE_WARP)</label>
-                <select class="form-control" id="cfg-ENABLE_WARP">
-                    <option value="false">Tắt (Mặc định - Nhanh nhất)</option>
-                    <option value="true">Bật (Ẩn IP Server qua Cloudflare WARP)</option>
-                </select>
-            </div>
-
-            <div class="form-group">
-                <label>Webhook URL (Tùy chọn gửi link tự động)</label>
-                <input class="form-control" id="cfg-WEBHOOK_URL" placeholder="https://discord.com/api/webhooks/..." />
-            </div>
+        <!-- BƯỚC CUỐI: LƯU & KHỞI ĐỘNG -->
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-top:4px;">
+            <span id="save-hint" style="font-size:12px; color:#94a3b8;">Hệ sẽ lưu vào <code>.env</code> và khởi động lại Xray + Tunnel ngay lập tức.</span>
+            <button class="btn btn-green" style="padding:10px 20px; font-size:13.5px;" onclick="saveConfig()" id="save-cfg-btn">
+                🚀 Lưu & Khởi Động Chế Độ Này
+            </button>
         </div>
     </div>
 
@@ -253,13 +390,20 @@ LOGGING_HTML_TEMPLATE = """
         const subUrlInput = document.getElementById("sub-url-input");
         subUrlInput.value = window.location.origin + "/sub";
 
+        const SNI_BOTH = "api24-normal-alisg.tiktokv.com#FreeTiktok,172.67.168.158#FreeVina Ko Nen";
+        const SNI_TIKTOK = "api24-normal-alisg.tiktokv.com#FreeTiktok";
+        const SNI_VINA = "172.67.168.158#FreeVina Ko Nen";
+
         let lastLogId = 0;
         let currentLinksText = "";
+        let detectedCountry = "";
+        let detectedIp = "";
 
-        function showToast(msg) {
+        function showToast(msg, isErr = false) {
             const el = document.getElementById("action-status");
+            el.style.color = isErr ? "#f87171" : "#4ade80";
             el.innerText = msg;
-            setTimeout(() => { if (el.innerText === msg) el.innerText = ""; }, 5000);
+            setTimeout(() => { if (el.innerText === msg) el.innerText = ""; }, 6000);
         }
 
         function copyText(text, btn) {
@@ -283,53 +427,193 @@ LOGGING_HTML_TEMPLATE = """
             }
         }
 
-        function updateModeUI() {
-            const mode = document.getElementById("cfg-RUN_MODE").value;
-            const desc = document.getElementById("mode-desc");
-            const grpHost = document.getElementById("grp-WS_HOST");
+        function autoFillCountry() {
+            if (detectedCountry && detectedCountry !== "?") {
+                document.getElementById("cfg-COUNTRY_CODE").value = detectedCountry;
+            }
+        }
+
+        function applySniPreset() {
+            const v = document.getElementById("sni-preset").value;
+            const input = document.getElementById("cfg-FAKE_SNI");
+            if (v === "both") input.value = SNI_BOTH;
+            else if (v === "tiktok") input.value = SNI_TIKTOK;
+            else if (v === "vina") input.value = SNI_VINA;
+        }
+
+        function syncSniPresetDropdown(val) {
+            const preset = document.getElementById("sni-preset");
+            if (val === SNI_BOTH) preset.value = "both";
+            else if (val === SNI_TIKTOK) preset.value = "tiktok";
+            else if (val === SNI_VINA) preset.value = "vina";
+            else preset.value = "custom";
+        }
+
+        function updateXhttpVisibility() {
+            const tr = document.getElementById("cfg-TRANSPORT").value;
+            document.getElementById("grp-XHTTP_MODE").style.display = tr.includes("xhttp") ? "flex" : "none";
+        }
+
+        function selectMode(mode) {
+            document.getElementById("cfg-RUN_MODE").value = mode;
+
+            const t1 = document.getElementById("tab-quick_tunnel");
+            const t2 = document.getElementById("tab-named_tunnel");
+            const t3 = document.getElementById("tab-direct");
+            t1.className = "mode-tab" + (mode === "quick_tunnel" ? " active-m1" : "");
+            t2.className = "mode-tab" + (mode === "named_tunnel" ? " active-m2" : "");
+            t3.className = "mode-tab" + (mode === "direct" ? " active-m3" : "");
+
+            document.getElementById("guide-quick_tunnel").style.display = mode === "quick_tunnel" ? "block" : "none";
+            document.getElementById("guide-named_tunnel").style.display = mode === "named_tunnel" ? "block" : "none";
+            document.getElementById("guide-direct").style.display = mode === "direct" ? "block" : "none";
+
+            const stepDomain = document.getElementById("step-domain-box");
+            const stepTransport = document.getElementById("step-transport-box");
             const grpToken = document.getElementById("grp-TUNNEL_TOKEN");
+            const grpDirectPort = document.getElementById("grp-DIRECT_PORT");
+            const saveBtn = document.getElementById("save-cfg-btn");
 
             if (mode === "quick_tunnel") {
-                desc.innerHTML = "<b>Mode 1 (Quick Tunnel):</b> Tự động tạo domain <code>*.trycloudflare.com</code> miễn phí, không cần tên miền riêng. Phù hợp nhất cho Railway & VPS. Kết hợp với <b>Link Sub</b> ở trên để tự động cập nhật khi tên miền đổi.";
-                grpToken.style.display = "none";
-                grpHost.style.display = "none";
+                stepDomain.style.display = "none";
+                stepTransport.style.display = "none";
+                document.getElementById("lbl-step-sni").innerText = "Bước 1/4";
+                document.getElementById("lbl-step-port").innerText = "Bước 2/4";
+                document.getElementById("lbl-step-node").innerText = "Bước 3/4";
+                saveBtn.innerText = "🚀 Lưu & Chạy Mode 1 (Quick Tunnel - Bước 4/4)";
             } else if (mode === "named_tunnel") {
-                desc.innerHTML = "<b>Mode 2 (Named Tunnel):</b> Sử dụng tên miền riêng cố định qua Cloudflare Zero Trust. Link không bao giờ thay đổi khi khởi động lại. Cần điền <b>WS_HOST</b> (ví dụ <code>vpn.tenmien.com</code>) và <b>TUNNEL_TOKEN</b>.";
+                stepDomain.style.display = "block";
+                stepTransport.style.display = "block";
                 grpToken.style.display = "flex";
-                grpHost.style.display = "flex";
+                grpDirectPort.style.display = "none";
+                document.getElementById("title-step-domain").innerText = "Domain & Cloudflare Tunnel Token (Bắt buộc)";
+                document.getElementById("lbl-step-sni").innerText = "Bước 2/6";
+                document.getElementById("lbl-step-port").innerText = "Bước 4/6";
+                document.getElementById("lbl-step-node").innerText = "Bước 5/6";
+                saveBtn.innerText = "🚀 Lưu & Chạy Mode 2 (Named Tunnel - Bước 6/6)";
+                updateXhttpVisibility();
             } else {
-                desc.innerHTML = "<b>Mode 3 (Direct Mode):</b> Kết nối trực tiếp qua DNS Cloudflare (Bật đám mây cam Proxied, SSL/TLS đặt <b>Flexible</b>) tới cổng 80 của VPS. Cần điền <b>WS_HOST</b> là tên miền đã trỏ IP và đặt <b>PORT</b> là <code>0.0.0.0:80</code>.";
+                stepDomain.style.display = "block";
+                stepTransport.style.display = "block";
                 grpToken.style.display = "none";
-                grpHost.style.display = "flex";
+                grpDirectPort.style.display = "flex";
+                document.getElementById("title-step-domain").innerText = "Domain Cloudflare & Cổng Origin Listener (Bắt buộc)";
+                document.getElementById("lbl-step-sni").innerText = "Bước 2/6";
+                document.getElementById("lbl-step-port").innerText = "Bước 4/6";
+                document.getElementById("lbl-step-node").innerText = "Bước 5/6";
+                saveBtn.innerText = "🚀 Lưu & Chạy Mode 3 (Direct Mode - Bước 6/6)";
+                updateXhttpVisibility();
             }
+        }
+
+        function cleanDomain(raw) {
+            let s = (raw || "").trim();
+            s = s.replace(/^https?:\\/\\//i, "").split("/")[0].trim();
+            return s;
+        }
+
+        function extractTunnelToken(raw) {
+            let s = (raw || "").trim();
+            const m = s.match(/eyJ[A-Za-z0-9_\\-=]+/);
+            return m ? m[0] : s;
         }
 
         async function loadConfig() {
             try {
                 const res = await fetch("/config");
                 const cfg = await res.json();
-                const keys = ["RUN_MODE", "PROTOCOL", "PORT_MODE", "TRANSPORT", "FAKE_SNI", "XRAY_UUID", "WS_PATH", "WS_HOST", "TUNNEL_TOKEN", "PORT", "COUNTRY_CODE", "ENABLE_WARP", "WEBHOOK_URL"];
-                keys.forEach(k => {
-                    const el = document.getElementById("cfg-" + k);
-                    if (el && cfg[k] !== undefined) el.value = cfg[k];
-                });
-                updateModeUI();
+                const mode = cfg.RUN_MODE || "quick_tunnel";
+                const modeNames = {
+                    "quick_tunnel": "Đang chạy: Mode 1 (Quick Tunnel)",
+                    "named_tunnel": "Đang chạy: Mode 2 (Named Tunnel)",
+                    "direct": "Đang chạy: Mode 3 (Direct Mode)"
+                };
+                document.getElementById("current-mode-badge").innerText = modeNames[mode] || mode;
+
+                document.getElementById("cfg-PROTOCOL").value = cfg.PROTOCOL || "vless";
+                document.getElementById("cfg-PORT_MODE").value = cfg.PORT_MODE || "both";
+                document.getElementById("cfg-TRANSPORT").value = cfg.TRANSPORT || "websocket";
+                document.getElementById("cfg-XHTTP_MODE").value = cfg.XHTTP_MODE || "packet-up";
+                document.getElementById("cfg-FAKE_SNI").value = cfg.FAKE_SNI || SNI_BOTH;
+                syncSniPresetDropdown(document.getElementById("cfg-FAKE_SNI").value);
+                document.getElementById("cfg-XRAY_UUID").value = cfg.XRAY_UUID || "";
+                document.getElementById("cfg-WS_PATH").value = cfg.WS_PATH || "/vless";
+                document.getElementById("cfg-TUNNEL_TOKEN").value = cfg.TUNNEL_TOKEN || "";
+                document.getElementById("cfg-COUNTRY_CODE").value = cfg.COUNTRY_CODE || "";
+                document.getElementById("cfg-ENABLE_WARP").value = cfg.ENABLE_WARP || "false";
+                document.getElementById("cfg-WEBHOOK_URL").value = cfg.WEBHOOK_URL || "";
+
+                const savedDomain = (cfg.WS_HOST && cfg.WS_HOST !== "trycloudflare.com") ? cfg.WS_HOST : (cfg.CUSTOM_DOMAIN || "");
+                document.getElementById("cfg-CUSTOM_DOMAIN").value = savedDomain;
+                if (mode === "direct" && cfg.PORT) {
+                    document.getElementById("cfg-DIRECT_PORT").value = cfg.PORT;
+                }
+
+                selectMode(mode);
             } catch (e) {}
         }
 
         async function saveConfig() {
+            const mode = document.getElementById("cfg-RUN_MODE").value;
+            const customDomain = cleanDomain(document.getElementById("cfg-CUSTOM_DOMAIN").value);
+            const tunnelToken = extractTunnelToken(document.getElementById("cfg-TUNNEL_TOKEN").value);
+            document.getElementById("cfg-CUSTOM_DOMAIN").value = customDomain;
+            document.getElementById("cfg-TUNNEL_TOKEN").value = tunnelToken;
+
+            if (mode === "named_tunnel") {
+                if (!customDomain || customDomain === "trycloudflare.com") {
+                    alert("⚠️ Mode 2 (Named Tunnel) bắt buộc phải nhập Tên miền riêng (WS_HOST) ở Bước 1/6!");
+                    document.getElementById("cfg-CUSTOM_DOMAIN").focus();
+                    return;
+                }
+                if (!tunnelToken) {
+                    alert("⚠️ Mode 2 (Named Tunnel) bắt buộc phải nhập Cloudflare Tunnel Token (TUNNEL_TOKEN) ở Bước 1/6!");
+                    document.getElementById("cfg-TUNNEL_TOKEN").focus();
+                    return;
+                }
+            } else if (mode === "direct") {
+                if (!customDomain || customDomain === "trycloudflare.com") {
+                    alert("⚠️ Mode 3 (Direct Mode) bắt buộc phải nhập Tên miền đã trỏ Cloudflare DNS ở Bước 1/6!");
+                    document.getElementById("cfg-CUSTOM_DOMAIN").focus();
+                    return;
+                }
+            }
+
+            const payload = {
+                RUN_MODE: mode,
+                PROTOCOL: document.getElementById("cfg-PROTOCOL").value,
+                PORT_MODE: document.getElementById("cfg-PORT_MODE").value,
+                FAKE_SNI: document.getElementById("cfg-FAKE_SNI").value.trim() || SNI_BOTH,
+                XRAY_UUID: document.getElementById("cfg-XRAY_UUID").value.trim(),
+                WS_PATH: document.getElementById("cfg-WS_PATH").value.trim() || "/vless",
+                COUNTRY_CODE: document.getElementById("cfg-COUNTRY_CODE").value.trim().toUpperCase(),
+                ENABLE_WARP: document.getElementById("cfg-ENABLE_WARP").value,
+                WEBHOOK_URL: document.getElementById("cfg-WEBHOOK_URL").value.trim(),
+                CUSTOM_DOMAIN: customDomain,
+                TUNNEL_TOKEN: tunnelToken
+            };
+
+            // Áp dụng quy tắc chuẩn của từng Mode giống hệt run.sh
+            if (mode === "quick_tunnel") {
+                payload.WS_HOST = "trycloudflare.com";
+                payload.PORT = "127.0.0.1:8888";
+                payload.TRANSPORT = "websocket";
+                payload.WS_PATH = "/vless";
+            } else if (mode === "named_tunnel") {
+                payload.WS_HOST = customDomain;
+                payload.PORT = "127.0.0.1:8888";
+                payload.TRANSPORT = document.getElementById("cfg-TRANSPORT").value;
+                payload.XHTTP_MODE = document.getElementById("cfg-XHTTP_MODE").value;
+            } else {
+                payload.WS_HOST = customDomain;
+                payload.PORT = document.getElementById("cfg-DIRECT_PORT").value.trim() || "0.0.0.0:80";
+                payload.TRANSPORT = document.getElementById("cfg-TRANSPORT").value;
+                payload.XHTTP_MODE = document.getElementById("cfg-XHTTP_MODE").value;
+            }
+
             const btn = document.getElementById("save-cfg-btn");
             btn.disabled = true;
             btn.innerText = "⏳ Đang lưu & khởi động lại Xray...";
-            const keys = ["RUN_MODE", "PROTOCOL", "PORT_MODE", "TRANSPORT", "FAKE_SNI", "XRAY_UUID", "WS_PATH", "WS_HOST", "TUNNEL_TOKEN", "PORT", "COUNTRY_CODE", "ENABLE_WARP", "WEBHOOK_URL"];
-            const payload = {};
-            keys.forEach(k => {
-                const el = document.getElementById("cfg-" + k);
-                if (el) payload[k] = el.value.trim();
-            });
-            if (payload.RUN_MODE === "quick_tunnel" && !payload.WS_HOST) {
-                payload.WS_HOST = "trycloudflare.com";
-            }
             try {
                 const res = await fetch("/config", {
                     method: "POST",
@@ -339,13 +623,14 @@ LOGGING_HTML_TEMPLATE = """
                 const d = await res.json();
                 showToast(d.message || "✅ Đã lưu cấu hình & khởi động lại Xray!");
                 currentLinksText = "";
-                linksContainer.innerHTML = "⏳ Đang áp dụng cấu hình mới và tạo lại link (~4 giây)...";
+                linksContainer.innerHTML = "⏳ Đang khởi tạo kết nối theo chế độ mới và tạo lại link (~4 giây)...";
+                await loadConfig();
             } catch (e) {
-                showToast("❌ Lỗi khi lưu cấu hình");
+                showToast("❌ Lỗi khi lưu cấu hình", true);
             } finally {
                 setTimeout(() => {
                     btn.disabled = false;
-                    btn.innerText = "💾 Lưu Cấu Hình & Khởi Động Lại Xray";
+                    selectMode(document.getElementById("cfg-RUN_MODE").value);
                     fetchLinks();
                 }, 3000);
             }
@@ -367,7 +652,7 @@ LOGGING_HTML_TEMPLATE = """
                 showToast(d.message || "✅ Đã thực hiện!");
                 await loadConfig();
             } catch (e) {
-                showToast("❌ Có lỗi xảy ra");
+                showToast("❌ Có lỗi xảy ra", true);
             } finally {
                 setTimeout(() => {
                     btn.disabled = false;
@@ -381,7 +666,11 @@ LOGGING_HTML_TEMPLATE = """
             try {
                 const res = await fetch("/server_info");
                 const d = await res.json();
+                detectedCountry = d.country || "";
+                detectedIp = d.ip || "";
                 document.getElementById("srv-loc").innerText = `${d.city || "?"} (${d.country || "?"}) - ${d.ip || ""}`;
+                const ipHint = document.getElementById("direct-ip-hint");
+                if (ipHint && d.ip) ipHint.innerText = d.ip;
                 if (d.country && !["SG", "VN", "HK", "JP", "TW"].includes(d.country)) {
                     const w = document.getElementById("region-warn");
                     w.style.display = "block";
@@ -539,6 +828,12 @@ class RealtimeLogger:
         for k, v in updates.items():
             if k in DEFAULT_ENV_CONFIG and v is not None:
                 clean_v = str(v).replace("\r", "").replace("\n", "").strip()
+                if k == "TUNNEL_TOKEN" and clean_v:
+                    m = re.search(r"eyJ[A-Za-z0-9_\-=]+", clean_v)
+                    if m:
+                        clean_v = m.group(0)
+                elif k in ("WS_HOST", "CUSTOM_DOMAIN") and clean_v:
+                    clean_v = re.sub(r"^https?://", "", clean_v, flags=re.IGNORECASE).split("/")[0].strip()
                 cfg[k] = clean_v
                 os.environ[k] = clean_v
 
@@ -679,7 +974,6 @@ class RealtimeLogger:
             def do_GET(self):
                 parsed = urlparse(self.path)
 
-                # Cho phép truy cập /sub không cần mật khẩu để các app VPN (Shadowrocket, v2rayNG...) tự động cập nhật
                 if parsed.path == "/sub":
                     query = parse_qs(parsed.query)
                     links = logger_ref.get_links_list()
@@ -772,7 +1066,7 @@ class RealtimeLogger:
                 if parsed.path == "/config":
                     cfg = logger_ref.save_env_config(data)
                     logger_ref.push_log(
-                        f"[CONFIG] Đã lưu cấu hình mới (Mode={cfg.get('RUN_MODE')}, Protocol={cfg.get('PROTOCOL')}, PortMode={cfg.get('PORT_MODE')}). Đang khởi động lại Xray...",
+                        f"[CONFIG] Đã lưu cấu hình (Mode={cfg.get('RUN_MODE')}, Host={cfg.get('WS_HOST')}, Protocol={cfg.get('PROTOCOL')}, Transport={cfg.get('TRANSPORT')}). Đang khởi động lại...",
                         "SUCCESS"
                     )
                     if logger_ref.action_callback:

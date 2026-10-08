@@ -166,9 +166,12 @@ def main():
         WS_PATH = (get_os_env("WS_PATH") or "/vless").strip()
         if not WS_PATH.startswith("/"):
             WS_PATH = "/" + WS_PATH
-        WS_HOST = (get_os_env("WS_HOST") or "trycloudflare.com").strip()
+        raw_ws_host = (get_os_env("WS_HOST") or "trycloudflare.com").strip()
+        WS_HOST = re.sub(r"^https?://", "", raw_ws_host, flags=re.IGNORECASE).split("/")[0].strip() or "trycloudflare.com"
         WEBHOOK_URL = (get_os_env("WEBHOOK_URL") or "").strip()
-        TUNNEL_TOKEN = (get_os_env("TUNNEL_TOKEN") or "").strip()
+        raw_token = (get_os_env("TUNNEL_TOKEN") or "").strip()
+        token_match = re.search(r"eyJ[A-Za-z0-9_\-=]+", raw_token)
+        TUNNEL_TOKEN = token_match.group(0) if token_match else raw_token
         ENABLE_WARP = (get_os_env("ENABLE_WARP") or "false").lower() == "true"
         RUN_MODE = (get_os_env("RUN_MODE") or "quick_tunnel").strip().lower()
         COUNTRY_CODE = (get_os_env("COUNTRY_CODE") or "").strip().upper()
