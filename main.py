@@ -112,7 +112,7 @@ def main():
 
     def logger_push(message, source="INFO"):
         if logger:
-            logger.push_log(f"[{source}] {message}", source)
+            logger.push_log(message, source)
             if os.getenv("DEBUG_MODE", "false").lower() == "true":
                 print(f"[{source}] {message}")
 
@@ -432,6 +432,12 @@ def main():
             try: os.remove("frp_info.config")
             except OSError: pass
 
+        # Dam bao tat sach tien trinh xray / cloudflared cu con sot lai giu cong 8888
+        if platform.system().lower() != "windows":
+            subprocess.run(["pkill", "-9", "-x", "xray"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["pkill", "-9", "-x", "cloudflared"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(0.3)
+
         inbounds_list, demux_intents = write_configs()
         print(f"[*] Launching XRAY (Mode={RUN_MODE}, Protocol={PROTOCOL}, PortMode={PORT_MODE})...")
         xp = subprocess.Popen([XRAY_BIN, "run", "-c", "config.json"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
@@ -482,13 +488,8 @@ def main():
                 if RUN_MODE == "direct":
                     return None
                 if RUN_MODE == "named_tunnel":
-                    named_tunnel_args = [CLF_BIN, "tunnel", "run"]
-                    if is_termux:
-                        named_tunnel_args.extend(["--protocol", "http2"])
-                        print("[*] Launching Cloudflare Named Tunnel (token mode, HTTP/2 for Termux)...")
-                    else:
-                        print("[*] Launching Cloudflare Named Tunnel (token mode)...")
-                    named_tunnel_args.extend(["--token", TUNNEL_TOKEN])
+                    print("[*] Launching Cloudflare Named Tunnel (token mode, HTTP/2)...")
+                    named_tunnel_args = [CLF_BIN, "tunnel", "--protocol", "http2", "run", "--token", TUNNEL_TOKEN]
                     return subprocess.Popen(
                         named_tunnel_args,
                         stdout=subprocess.PIPE,
