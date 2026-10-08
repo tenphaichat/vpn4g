@@ -265,9 +265,15 @@ def main():
     # VLESS transport config generator
     # =========================================
     def build_stream_settings(transport):
+        sockopt = {
+            "tcpFastOpen": True,
+            "tcpNoDelay": True,
+            "tcpKeepAliveIdle": 60,
+            "tcpKeepAliveInterval": 15
+        }
         if transport == "xhttp":
-            return {"network": "xhttp", "security": "none", "xhttpSettings": {"path": WS_PATH, "mode": XHTTP_MODE}}
-        return {"network": "ws", "security": "none", "wsSettings": {"path": WS_PATH, "headers": {}}}
+            return {"network": "xhttp", "security": "none", "xhttpSettings": {"path": WS_PATH, "mode": XHTTP_MODE}, "sockopt": sockopt}
+        return {"network": "ws", "security": "none", "wsSettings": {"path": WS_PATH, "headers": {}}, "sockopt": sockopt}
 
     # Dual transport uses separate loopback Xray inbounds and a TCP demux on
     # the public endpoint. WebSocket Upgrade goes to WS; plain HTTP goes xHTTP.
@@ -292,7 +298,10 @@ def main():
             try: dst.shutdown(socket.SHUT_WR)
             except OSError: pass
     def handle_demux_connection(client_conn, ws_port, xhttp_port):
-        try: backend_conn = socket.create_connection(("127.0.0.1", ws_port if peek_is_websocket(client_conn) else xhttp_port), timeout=5)
+        try:
+            client_conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            backend_conn = socket.create_connection(("127.0.0.1", ws_port if peek_is_websocket(client_conn) else xhttp_port), timeout=5)
+            backend_conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         except OSError:
             client_conn.close(); return
         threading.Thread(target=pipe_bytes, args=(client_conn, backend_conn), daemon=True).start()
@@ -310,7 +319,14 @@ def main():
         print(f"[*] Dual transport demux: {listen_ip}:{listen_port} -> ws:{ws_port}, xhttp:{xhttp_port}")
         return server
     def make_inbound(listen, port, transport):
-        return {"port": port, "listen": listen, "protocol": "vless", "sniffing": {"enabled": True, "destOverride": ["http", "tls"]}, "settings": {"clients": [{"id": UUID, "level": 0}], "decryption": "none"}, "streamSettings": build_stream_settings(transport)}
+        return {
+            "port": port,
+            "listen": listen,
+            "protocol": "vless",
+            "sniffing": {"enabled": True, "destOverride": ["http", "tls"], "routeOnly": True},
+            "settings": {"clients": [{"id": UUID, "level": 0}], "decryption": "none"},
+            "streamSettings": build_stream_settings(transport)
+        }
     def write_configs():
         inbounds, demux_servers = [], []
         for ip, port in inbound_ports:
@@ -319,7 +335,40 @@ def main():
                 inbounds.extend([make_inbound("127.0.0.1", ws_port, "websocket"), make_inbound("127.0.0.1", xhttp_port, "xhttp")])
                 demux_servers.append((ip, port, ws_port, xhttp_port))
             else: inbounds.append(make_inbound(ip, port, TRANSPORTS[0]))
-        xray_config = {"log": {"loglevel": "debug"}, "inbounds": inbounds, "outbounds": [{"protocol": "freedom", "settings": {"domainStrategy": "UseIPv4"}}]}
+        xray_config = {
+            "log": {"loglevel": "debug" if DEBUG_MODE else "error"},
+            "dns": {
+                "servers": ["1.1.1.1", "8.8.8.8"],
+                "queryStrategy": "UseIPv4",
+                "disableFallbackIfMatch": True
+            },
+            "policy": {
+                "levels": {
+                    "0": {
+                        "handshake": 4,
+                        "connIdle": 300,
+                        "uplinkOnly": 0,
+                        "downlinkOnly": 0,
+                        "bufferSize": 64
+                    }
+                }
+            },
+            "inbounds": inbounds,
+            "outbounds": [
+                {
+                    "protocol": "freedom",
+                    "settings": {"domainStrategy": "UseIPv4"},
+                    "streamSettings": {
+                        "sockopt": {
+                            "tcpFastOpen": True,
+                            "tcpNoDelay": True,
+                            "tcpKeepAliveIdle": 60,
+                            "tcpKeepAliveInterval": 15
+                        }
+                    }
+                }
+            ]
+        }
         if ENABLE_WARP and wgcf_outbound: xray_config["outbounds"].insert(0, wgcf_outbound)
         with open("config.json", "w", encoding="utf-8") as config_file: json.dump(xray_config, config_file, indent=2)
         return demux_servers
@@ -368,7 +417,7 @@ def main():
             # Mobile networks frequently block or destabilize QUIC/UDP. Mode 1
             # already uses HTTP/2 on Termux, so use the same TCP-only connector
             # path for a named tunnel instead of token mode's QUIC-first auto mode.
-            named_tunnel_args = [CLF_BIN, "tunnel", "run"]
+            named_tunnel_args = [CLF_BIN, "tunnel", "--no-autoupdate", "--edge-ip-version", "4", "run"]
             if is_termux:
                 named_tunnel_args.extend(["--protocol", "http2"])
                 print("[*] Launching Cloudflare Named Tunnel (token mode, HTTP/2 for Termux)...")
@@ -389,7 +438,7 @@ def main():
         tunnel_protocol = "http2" if RUN_MODE == "quick_tunnel" else "auto"
         print(f"[*] Launching Cloudflare Tunnel ({tunnel_protocol}) pointing to http://{CLOUDFLARE_TARGET_IP}:{CLOUDFLARE_TARGET_PORT}...")
         return subprocess.Popen(
-            [CLF_BIN, "tunnel", "--protocol", tunnel_protocol, "--url", f"http://{CLOUDFLARE_TARGET_IP}:{CLOUDFLARE_TARGET_PORT}"],
+            [CLF_BIN, "tunnel", "--no-autoupdate", "--edge-ip-version", "4", "--protocol", tunnel_protocol, "--url", f"http://{CLOUDFLARE_TARGET_IP}:{CLOUDFLARE_TARGET_PORT}"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -480,13 +529,15 @@ def main():
 
     def print_vless_links(tunnel_host, uuid_str, fake_sni, ws_path):
         import urllib.parse
-        encoded_path = urllib.parse.quote(ws_path, safe='')
+        encoded_ws_path = urllib.parse.quote(f"{ws_path}?ed=2048", safe='')
+        encoded_xhttp_path = urllib.parse.quote(ws_path, safe='')
         tunnel_host_info = WS_HOST if WS_HOST and WS_HOST != "trycloudflare.com" else tunnel_host
         payloads = []
         country_flag = flag_emoji(COUNTRY_CODE)
         country_prefix = f"[{country_flag}] {COUNTRY_CODE} | " if country_flag else ""
 
         def add_link(sni, transport, label):
+            encoded_path = encoded_ws_path if transport == "websocket" else encoded_xhttp_path
             params = f"type={'ws' if transport == 'websocket' else 'xhttp'}&encryption=none&security="
             xhttp_params = f"&mode={XHTTP_MODE}" if transport == "xhttp" else ""
             link_name = urllib.parse.quote(f"{label} {'WS' if transport == 'websocket' else 'XHTTP'}", safe='')
