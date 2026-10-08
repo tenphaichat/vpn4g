@@ -896,13 +896,13 @@ class RealtimeLogger:
         dl_lock = threading.Lock()
 
         def dl_worker():
-            url = "https://speed.cloudflare.com/__down?bytes=50000000"
+            url = "https://speed.cloudflare.com/__down?bytes=100000000"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             while time.perf_counter() < stop_dl:
                 try:
                     with urllib.request.urlopen(req, timeout=4) as r:
                         while time.perf_counter() < stop_dl:
-                            chunk = r.read(65536)
+                            chunk = r.read(1048576)
                             if not chunk:
                                 break
                             with dl_lock:
