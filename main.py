@@ -41,7 +41,7 @@ def main():
 
     signal.signal(signal.SIGTERM, _handle_stop_signal)
     if hasattr(signal, "SIGHUP"):
-        signal.signal(signal.SIGHUP, _handle_stop_signal)
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
 
     # =========================================
     # CONFIG SERVER (Cloudflare Tunnel)

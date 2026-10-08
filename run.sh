@@ -365,9 +365,16 @@ svc_start(){
         run_as_root systemctl start "$SERVICE_NAME" 2>/dev/null
         return $?
     fi
-    [ -x "$RUNNER_FILE" ] || { err "Chua cai runner script. Hay chon Cai lai service."; return 1; }
+    if [ ! -x "$RUNNER_FILE" ]; then
+        install_service
+        return $?
+    fi
     svc_is_active && svc_stop
-    nohup "$RUNNER_FILE" >/dev/null 2>&1 &
+    if command -v setsid >/dev/null 2>&1; then
+        setsid nohup "$RUNNER_FILE" >/dev/null 2>&1 < /dev/null &
+    else
+        nohup "$RUNNER_FILE" >/dev/null 2>&1 < /dev/null &
+    fi
     echo $! > "$PID_FILE"
     sleep 1
     svc_is_active
@@ -380,6 +387,10 @@ svc_restart(){
         sleep 2
         svc_is_active
     else
+        if [ ! -x "$RUNNER_FILE" ]; then
+            install_service
+            return $?
+        fi
         svc_stop
         sleep 1
         svc_start
@@ -543,6 +554,7 @@ cleanup() {
     rm -f "$CHILD_PID_FILE"
     exit 0
 }
+trap '' HUP
 trap cleanup TERM INT EXIT
 while true; do
     echo "[\$(date '+%Y-%m-%d %H:%M:%S')] [SUPERVISOR] Starting $PYBIN_ABS $SCRIPT_DIR/main.py" >> "$LOG_FILE"
