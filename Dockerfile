@@ -3,9 +3,9 @@ FROM --platform=linux/amd64 python:3.11-slim
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-# Chi cai ca-certificates (bat buoc cho cloudflared/xray TLS) va procps/curl rat nhe (~5MB)
+# Cai ca-certificates, curl, git, procps
 RUN apt-get update -y && apt-get install --no-install-recommends -y \
-    ca-certificates curl procps \
+    ca-certificates curl git procps \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

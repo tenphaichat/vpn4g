@@ -403,18 +403,17 @@ class RealtimeLogger:
             return True
         return False
 
-# --- VÍ DỤ SỬ DỤNG TRONG FILE KHÁC ---
 if __name__ == "__main__":
-    # 1. Khởi tạo
-    logger = RealtimeLogger(port=9000, password="123")
-    
-    # 2. Start
-    logger.start()
-    
-    # 3. Sử dụng
-    try:
-        while True:
-            logger.push_log("Đang xử lý dữ liệu...", "INFO")
-            time.sleep(2)
-    except KeyboardInterrupt:
-        logger.stop()
+    logger = RealtimeLogger(port=9000, password=None)
+    info = logger.get_server_info()
+    print("=" * 60)
+    print(f" 🌐 Vị trí Server : {info.get('city', '?')}, {info.get('region', '?')}, {info.get('country', '?')}")
+    print(f" 🖧  IP / Nhà mạng : {info.get('ip', '?')} ({info.get('org', '?')})")
+    print("=" * 60)
+    print(" ⚡ Đang chạy Speedtest đa luồng tới Cloudflare (~8 giây)...")
+    res = logger.run_server_speedtest()
+    print("-" * 60)
+    print(f" 🟢 Ping     : {res['ping_ms']} ms")
+    print(f" ⬇️  Download : {res['download_mbps']} Mbps")
+    print(f" ⬆️  Upload   : {res['upload_mbps']} Mbps")
+    print("=" * 60)
