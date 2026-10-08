@@ -311,7 +311,7 @@ def main():
         def build_stream_settings(transport, path_override=None):
             use_path = path_override or WS_PATH
             if transport == "xhttp":
-                return {"network": "xhttp", "security": "none", "xhttpSettings": {"path": use_path, "mode": XHTTP_MODE}}
+                return {"network": "xhttp", "security": "none", "xhttpSettings": {"path": use_path, "mode": "auto"}}
             return {"network": "ws", "security": "none", "wsSettings": {"path": use_path, "headers": {}}}
 
         def make_inbound(listen, port, transport, proto="vless", path_override=None):
