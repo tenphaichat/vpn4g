@@ -233,6 +233,9 @@ def main():
         XHTTP_MODE = (get_os_env("XHTTP_MODE") or "packet-up").strip().lower()
         if XHTTP_MODE not in {"packet-up", "stream-up", "stream-one"}:
             XHTTP_MODE = "packet-up"
+        if "xhttp" in TRANSPORTS and RUN_MODE == "named_tunnel" and XHTTP_MODE != "packet-up":
+            logger_push(f"[INFO] Cloudflare Named Tunnel yêu cầu xHTTP mode 'packet-up' (chế độ '{XHTTP_MODE}' bị Cloudflare chặn/treo luồng upload). Đã tự động chuyển sang 'packet-up'.", "INFO")
+            XHTTP_MODE = "packet-up"
 
         inbound_ports = []
         try:
@@ -336,7 +339,7 @@ def main():
             first_line = data.split(b"\r\n", 1)[0]
             is_vmess = b"/vmess" in first_line
             is_ws = b"upgrade: websocket" in data.lower()
-            return is_vmess, is_ws
+            return is_vmess, is_ws, len(data) == 0
 
         def pipe_bytes(src, dst):
             try:
@@ -351,13 +354,16 @@ def main():
                 except OSError: pass
 
         def handle_demux_connection(client_conn, routes):
-            is_vmess, is_ws = peek_request_info(client_conn)
+            is_vmess, is_ws, is_empty = peek_request_info(client_conn)
+            if is_empty:
+                client_conn.close()
+                return
             if is_vmess and "vmess_ws" in routes:
                 target_port = routes["vmess_ws"]
             elif not is_ws and "vless_xhttp" in routes:
                 target_port = routes["vless_xhttp"]
             else:
-                target_port = routes.get("vless_ws") or routes.get("vmess_ws")
+                target_port = routes.get("vless_ws") or routes.get("vmess_ws") or routes.get("vless_xhttp")
             try:
                 backend_conn = socket.create_connection(("127.0.0.1", target_port), timeout=5)
             except OSError:
@@ -369,31 +375,43 @@ def main():
         def start_demux_server(listen_ip, listen_port, routes):
             server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if hasattr(socket, "SO_REUSEPORT"):
+                try:
+                    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+                except OSError:
+                    pass
             server.bind((listen_ip if listen_ip != "0.0.0.0" else "", listen_port))
             server.listen(128)
+            stop_flag = [False]
             def accept_loop():
-                while True:
+                while not stop_flag[0]:
                     try:
                         connection, _ = server.accept()
                     except OSError:
                         break
+                    if stop_flag[0]:
+                        try: connection.close()
+                        except OSError: pass
+                        break
                     threading.Thread(target=handle_demux_connection, args=(connection, routes), daemon=True).start()
             threading.Thread(target=accept_loop, daemon=True).start()
             print(f"[*] Demux listener: {listen_ip}:{listen_port} -> {routes}")
-            return server
+            return (server, listen_port, stop_flag)
 
         def write_configs():
             inbounds, demux_servers = [], []
             for ip, port in inbound_ports:
-                if DUAL_TRANSPORT:
+                if DUAL_TRANSPORT or (PROTOCOL == "both" and "xhttp" in TRANSPORTS):
                     routes = {}
                     if PROTOCOL in ("vless", "both"):
-                        vless_ws_port = port + 10000
-                        inbounds.append(make_inbound("127.0.0.1", vless_ws_port, "websocket", proto="vless", path_override=WS_PATH))
-                        routes["vless_ws"] = vless_ws_port
-                        vless_xhttp_port = port + 20000
-                        inbounds.append(make_inbound("127.0.0.1", vless_xhttp_port, "xhttp", proto="vless", path_override=WS_PATH))
-                        routes["vless_xhttp"] = vless_xhttp_port
+                        if "websocket" in TRANSPORTS:
+                            vless_ws_port = port + 10000
+                            inbounds.append(make_inbound("127.0.0.1", vless_ws_port, "websocket", proto="vless", path_override=WS_PATH))
+                            routes["vless_ws"] = vless_ws_port
+                        if "xhttp" in TRANSPORTS:
+                            vless_xhttp_port = port + 20000
+                            inbounds.append(make_inbound("127.0.0.1", vless_xhttp_port, "xhttp", proto="vless", path_override=WS_PATH))
+                            routes["vless_xhttp"] = vless_xhttp_port
                     if PROTOCOL in ("vmess", "both"):
                         vmess_ws_port = port + 11000
                         vmess_path = "/vmess" if PROTOCOL == "both" else WS_PATH
@@ -702,9 +720,15 @@ def main():
             stop_program = True
             print("\n[*] Stopping services...")
         finally:
-            for srv in demux_listeners:
+            for srv, d_port, stop_flag in demux_listeners:
+                stop_flag[0] = True
                 try:
                     srv.close()
+                except Exception:
+                    pass
+                try:
+                    with socket.create_connection(("127.0.0.1", d_port), timeout=0.1):
+                        pass
                 except Exception:
                     pass
             for proc in (clp, xp):

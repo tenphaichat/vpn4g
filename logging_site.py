@@ -300,10 +300,11 @@ LOGGING_HTML_TEMPLATE = """
                 <div class="form-group" id="grp-XHTTP_MODE" style="display:none;">
                     <label>Chế độ xHTTP (XHTTP_MODE)</label>
                     <select class="form-control" id="cfg-XHTTP_MODE">
-                        <option value="packet-up">1. packet-up (Mặc định)</option>
-                        <option value="stream-up">2. stream-up</option>
-                        <option value="stream-one">3. stream-one</option>
+                        <option value="packet-up">1. packet-up (Bắt buộc cho Cloudflare Tunnel / CDN)</option>
+                        <option value="stream-up">2. stream-up (Chỉ dùng cho Mode 3 Direct H2)</option>
+                        <option value="stream-one">3. stream-one (Chỉ dùng cho Mode 3 Direct H2)</option>
                     </select>
+                    <span class="field-hint">Qua Cloudflare Named Tunnel bắt buộc dùng <code>packet-up</code> (<code>stream-up</code> sẽ bị Cloudflare ngắt luồng).</span>
                 </div>
                 <div class="form-group">
                     <label>Đường dẫn Endpoint (WS_PATH)</label>
