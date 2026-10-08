@@ -386,11 +386,15 @@ class RealtimeLogger:
         if self.server:
             return f"http://localhost:{self.port}"
 
+        ThreadingHTTPServer.allow_reuse_address = True
         handler_cls = self._create_handler()
 
         def run_server():
-            self.server = ThreadingHTTPServer(("0.0.0.0", self.port), handler_cls)
-            self.server.serve_forever()
+            try:
+                self.server = ThreadingHTTPServer(("0.0.0.0", self.port), handler_cls)
+                self.server.serve_forever()
+            except Exception as e:
+                print(f"[!] Web UI port {self.port} bind error: {e}")
 
         self.server_thread = threading.Thread(target=run_server, daemon=True)
         self.server_thread.start()
@@ -405,7 +409,7 @@ class RealtimeLogger:
                 except Exception:
                     pass
 
-        return f"http://localhost:{self.port}"
+        return f"http://localhost:{self.port} (fallback: 9999, 8080)"
 
     def stop(self):
         """Dừng server"""
