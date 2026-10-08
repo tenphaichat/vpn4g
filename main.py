@@ -50,7 +50,7 @@ def main():
         "WEBHOOK_URL": "",
         "TUNNEL_TOKEN": "",
         "COUNTRY_CODE": "",
-        "PORT_MODE": "443",
+        "PORT_MODE": "both",
         "RUN_MODE": "quick_tunnel"
     }
     START_TIME = int(time.time())
@@ -100,7 +100,7 @@ def main():
     COUNTRY_CODE = get_os_env("COUNTRY_CODE").strip().upper()
     PORT_MODE = get_os_env("PORT_MODE").strip().lower()
     if PORT_MODE not in ("80", "443", "both"):
-        PORT_MODE = "443"
+        PORT_MODE = "both"
 
     # Normalize RUN_MODE. Old .env files without RUN_MODE default to quick_tunnel.
     ALLOWED_RUN_MODES = ("quick_tunnel", "named_tunnel", "direct")

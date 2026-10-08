@@ -32,7 +32,7 @@ DEF_WS_HOST="trycloudflare.com"
 DEF_TRANSPORT="websocket,xhttp"
 DEF_XHTTP_MODE="packet-up"
 
-RUN_MODE=""; PORT=""; UUID=""; FAKE_SNI=""; WS_PATH=""; WS_HOST=""; TUNNEL_TOKEN=""; ENABLE_WARP="false"; WEBHOOK_URL=""; TRANSPORT="websocket,xhttp"; XHTTP_MODE="packet-up"; COUNTRY_CODE=""; CUSTOM_DOMAIN=""; PORT_MODE="443"
+RUN_MODE=""; PORT=""; UUID=""; FAKE_SNI=""; WS_PATH=""; WS_HOST=""; TUNNEL_TOKEN=""; ENABLE_WARP="false"; WEBHOOK_URL=""; TRANSPORT="websocket,xhttp"; XHTTP_MODE="packet-up"; COUNTRY_CODE=""; CUSTOM_DOMAIN=""; PORT_MODE="both"
 
 header(){ echo; echo -e "${CYAN}===================================================${NC}"; echo -e "${GREEN} $1${NC}"; echo -e "${CYAN}===================================================${NC}"; }
 ok(){ echo -e " ${GREEN}[OK]${NC} $1"; }
@@ -124,18 +124,18 @@ quick_tunnel_transport(){
 }
 
 ask_port_mode(){
-    local choice default_choice="2"
+    local choice default_choice="3"
     echo -e " ${BLUE}[i]${NC}  Chon port cho link VLESS:"
     echo "   1. Chi port 80 (KHONG TLS)"
-    echo "   2. Chi port 443 (TLS, mac dinh)"
-    echo "   3. Ca 80 + 443"
+    echo "   2. Chi port 443 (TLS)"
+    echo "   3. Ca 80 + 443 (mac dinh)"
     read -r -p " Chon [1/2/3] [$default_choice]: " choice
     choice="${choice:-$default_choice}"
     case "$choice" in
         1) PORT_MODE="80" ;;
         2) PORT_MODE="443" ;;
         3) PORT_MODE="both" ;;
-        *) warn "Lua chon khong hop le; giu lai ${PORT_MODE:-443}."; PORT_MODE="${PORT_MODE:-443}" ;;
+        *) warn "Lua chon khong hop le; giu lai ${PORT_MODE:-both}."; PORT_MODE="${PORT_MODE:-both}" ;;
     esac
     ok "Che do port: $PORT_MODE"
 }
@@ -295,7 +295,7 @@ load_existing(){
     COUNTRY_CODE="$(env_get COUNTRY_CODE)"
     CUSTOM_DOMAIN="$(env_get CUSTOM_DOMAIN)"
     PORT_MODE="$(env_get PORT_MODE)"
-    PORT_MODE="${PORT_MODE:-443}"
+    PORT_MODE="${PORT_MODE:-both}"
 }
 
 # ==================== Systemd & Container Supervisor ====================
@@ -633,7 +633,7 @@ auto_quick_mode(){
     WS_PATH="$DEF_WS_PATH"
     WS_HOST="$DEF_WS_HOST"
     TRANSPORT="websocket"
-    PORT_MODE="${PORT_MODE:-443}"
+    PORT_MODE="${PORT_MODE:-both}"
     write_env || exit 1
     start_server
 }
