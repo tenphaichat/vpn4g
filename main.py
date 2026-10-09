@@ -133,7 +133,7 @@ def main():
         raw_web_port = os.getenv("WEB_PORT") or (RAILWAY_WEB_PORT if (IS_RAILWAY or init_run_mode != "direct") else None) or "9999"
         clean_web_port = str(raw_web_port).split(":")[-1].strip()
         web_port = int(clean_web_port) if clean_web_port.isdigit() else 9999
-        if web_port == 8888:
+        if not IS_RAILWAY and web_port == 8888:
             web_port = 9999
         web_password = os.getenv("WEB_PASSWORD", "") or None
         logger = RealtimeLogger(port=web_port, password=web_password, action_callback=on_dashboard_action)
@@ -223,7 +223,9 @@ def main():
 
         if IS_RAILWAY and RUN_MODE == "direct":
             RUN_MODE = "named_tunnel" if TUNNEL_TOKEN else "quick_tunnel"
-        if IS_RAILWAY or RUN_MODE in ("quick_tunnel", "named_tunnel"):
+        if IS_RAILWAY:
+            PORT_ENV = os.getenv("XRAY_PORT", "127.0.0.1:18888")
+        elif RUN_MODE in ("quick_tunnel", "named_tunnel"):
             PORT_ENV = os.getenv("XRAY_PORT", "127.0.0.1:8888")
 
         def wait_for_config_fix(err_msg):

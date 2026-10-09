@@ -1342,7 +1342,7 @@ class RealtimeLogger:
 
         self.extra_servers = []
         is_railway = bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID") or os.getenv("RAILWAY_SERVICE_ID") or os.getenv("RAILWAY_PUBLIC_DOMAIN"))
-        fallback_ports = (9999, 8080, 80, 3000, 5000) if is_railway else (9999, 8080)
+        fallback_ports = (9999, 8080, 8888, 80, 443, 3000, 5000, 6080) if is_railway else (9999, 8080)
         for extra_port in fallback_ports:
             if extra_port != self.port:
                 try:
