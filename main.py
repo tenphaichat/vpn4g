@@ -361,9 +361,13 @@ def main():
             finally:
                 conn.settimeout(None)
             first_line = data.split(b"\r\n", 1)[0]
-            is_vmess = b"/vmess" in first_line
+            parts = first_line.split(b" ")
+            req_path = parts[1] if len(parts) >= 2 else b""
+            ws_path_bytes = (WS_PATH or "/vless").encode("utf-8")
+            is_vless_path = req_path.startswith(ws_path_bytes)
+            is_vmess = req_path.startswith(b"/vmess") or (PROTOCOL == "vmess" and is_vless_path)
             is_ws = b"upgrade: websocket" in data.lower()
-            return is_vmess, is_ws, len(data) == 0
+            return is_vless_path, is_vmess, is_ws, len(data) == 0
 
         def pipe_bytes(src, dst):
             try:
@@ -378,12 +382,14 @@ def main():
                 except OSError: pass
 
         def handle_demux_connection(client_conn, routes):
-            is_vmess, is_ws, is_empty = peek_request_info(client_conn)
+            is_vless_path, is_vmess, is_ws, is_empty = peek_request_info(client_conn)
             if is_empty:
                 client_conn.close()
                 return
             if is_vmess and "vmess_ws" in routes:
                 target_port = routes["vmess_ws"]
+            elif not is_vless_path and not is_vmess and "web_ui" in routes:
+                target_port = routes["web_ui"]
             elif not is_ws and "vless_xhttp" in routes:
                 target_port = routes["vless_xhttp"]
             else:
@@ -424,9 +430,12 @@ def main():
 
         def write_configs():
             inbounds, demux_servers = [], []
+            web_ui_port = logger.port if (logger and getattr(logger, "port", None) and WS_PATH != "/") else None
             for ip, port in inbound_ports:
-                if DUAL_TRANSPORT or (PROTOCOL == "both" and "xhttp" in TRANSPORTS):
+                if DUAL_TRANSPORT or (PROTOCOL == "both" and "xhttp" in TRANSPORTS) or (web_ui_port and ("xhttp" in TRANSPORTS or PROTOCOL == "vmess")):
                     routes = {}
+                    if web_ui_port and port != web_ui_port:
+                        routes["web_ui"] = web_ui_port
                     if PROTOCOL in ("vless", "both"):
                         if "websocket" in TRANSPORTS:
                             vless_ws_port = port + 10000
@@ -442,10 +451,15 @@ def main():
                         inbounds.append(make_inbound("127.0.0.1", vmess_ws_port, "websocket", proto="vmess", path_override=vmess_path))
                         routes["vmess_ws"] = vmess_ws_port
                     demux_servers.append((ip, port, routes))
-                elif PROTOCOL == "both":
-                    # Chay song song VLESS + VMess bang native fallbacks cua Xray-core (Go 100%, khong qua Python proxy)
+                elif PROTOCOL in ("vless", "both") and (PROTOCOL == "both" or (web_ui_port and port != web_ui_port)):
+                    # Chay song song VLESS (+ VMess) + Web UI bang native fallbacks cua Xray-core (Go 100%, khong qua Python proxy)
                     vless_ws_port = port + 10000
-                    vmess_ws_port = port + 11000
+                    fallbacks = [{"path": WS_PATH, "dest": vless_ws_port}]
+                    if PROTOCOL == "both":
+                        vmess_ws_port = port + 11000
+                        fallbacks.append({"path": "/vmess", "dest": vmess_ws_port})
+                    if web_ui_port and port != web_ui_port:
+                        fallbacks.append({"dest": web_ui_port})
                     inbounds.append({
                         "port": port,
                         "listen": ip,
@@ -453,15 +467,13 @@ def main():
                         "settings": {
                             "clients": [{"id": UUID, "level": 0}],
                             "decryption": "none",
-                            "fallbacks": [
-                                {"path": WS_PATH, "dest": vless_ws_port},
-                                {"path": "/vmess", "dest": vmess_ws_port}
-                            ]
+                            "fallbacks": fallbacks
                         },
                         "streamSettings": {"network": "tcp", "security": "none"}
                     })
                     inbounds.append(make_inbound("127.0.0.1", vless_ws_port, "websocket", proto="vless", path_override=WS_PATH))
-                    inbounds.append(make_inbound("127.0.0.1", vmess_ws_port, "websocket", proto="vmess", path_override="/vmess"))
+                    if PROTOCOL == "both":
+                        inbounds.append(make_inbound("127.0.0.1", vmess_ws_port, "websocket", proto="vmess", path_override="/vmess"))
                 else:
                     inbounds.append(make_inbound(ip, port, TRANSPORTS[0], proto=PROTOCOL, path_override=WS_PATH))
             xray_config = {

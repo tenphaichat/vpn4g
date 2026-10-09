@@ -360,6 +360,17 @@ svc_stop(){
 
 tune_network_sysctl(){
     $IS_TERMUX && return 0
+    if command -v iptables >/dev/null 2>&1; then
+        for p in 9999 8080 80 443; do
+            run_as_root iptables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || \
+                run_as_root iptables -I INPUT 1 -p tcp --dport "$p" -j ACCEPT 2>/dev/null || true
+        done
+    fi
+    if command -v ufw >/dev/null 2>&1 && run_as_root ufw status 2>/dev/null | grep -q "Status: active"; then
+        for p in 9999 8080 80 443; do
+            run_as_root ufw allow "${p}/tcp" >/dev/null 2>&1 || true
+        done
+    fi
     command -v sysctl >/dev/null 2>&1 || return 0
     run_as_root sysctl -w net.core.rmem_max=26214400 >/dev/null 2>&1 || true
     run_as_root sysctl -w net.core.wmem_max=26214400 >/dev/null 2>&1 || true
@@ -879,7 +890,12 @@ while true; do
     ! $IS_TERMUX && ! has_systemd && echo -e "  ${CYAN}[Railway/Container]${NC} Background Supervisor (khong can systemd PID 1)"
     if ! $IS_TERMUX && (svc_exists || svc_is_active); then
         if svc_is_active; then
-            echo -e "  ${GREEN}● Service dang chay${NC}  $(env_get RUN_MODE) → $(env_get WS_HOST)"
+            ACTIVE_HOST="$(python3 -c 'import json; d=json.load(open("frp_info.json")); print(d.get("wshost",""))' 2>/dev/null)"
+            ACTIVE_IP="$(python3 -c 'import json; d=json.load(open("frp_info.json")); print(d.get("ip",""))' 2>/dev/null)"
+            [ -z "$ACTIVE_HOST" ] && ACTIVE_HOST="$(env_get WS_HOST)"
+            echo -e "  ${GREEN}● Service dang chay${NC}  $(env_get RUN_MODE) → ${CYAN}${ACTIVE_HOST}${NC}"
+            [ -n "$ACTIVE_HOST" ] && [ "$ACTIVE_HOST" != "trycloudflare.com" ] && echo -e "  🌐 Web UI (Tunnel) : ${GREEN}https://${ACTIVE_HOST}${NC}"
+            [ -n "$ACTIVE_IP" ] && [ "$ACTIVE_IP" != "0.0.0.0" ] && echo -e "  🌐 Web UI (IP)     : ${CYAN}http://${ACTIVE_IP}:9999${NC}"
         else
             echo -e "  ${YELLOW}● Service da dung${NC}"
         fi
