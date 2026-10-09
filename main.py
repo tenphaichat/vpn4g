@@ -538,7 +538,19 @@ def main():
                     try:
                         demux_listeners.append(start_demux_server(ip, port, routes))
                     except OSError as error:
-                        wait_for_config_fix(f"[ERROR] Không thể mở cổng demux {ip}:{port}: {error}")
+                        holder = ""
+                        if platform.system().lower() != "windows":
+                            try:
+                                out = subprocess.check_output(["ss", "-tulpn", f"sport = :{port}"], text=True, stderr=subprocess.DEVNULL)
+                                m = re.search(r'users:\(\("([^"]+)"', out)
+                                if m:
+                                    holder = f" (đang bị chiếm bởi: {m.group(1)})"
+                            except Exception:
+                                pass
+                        wait_for_config_fix(
+                            f"[ERROR] Không thể mở cổng demux {ip}:{port}{holder}: {error}. "
+                            f"Nếu VPS đang chạy web (nginx/apache) ở cổng 80, hãy dùng Mode 2 (Named Tunnel) hoặc đổi cổng Mode 3 sang 0.0.0.0:8080!"
+                        )
                         break
                 if len(demux_listeners) != len(demux_intents):
                     continue
@@ -601,6 +613,7 @@ def main():
                 payloads = []
                 country_flag = flag_emoji(COUNTRY_CODE)
                 country_prefix = f"[{country_flag}] {COUNTRY_CODE} | " if country_flag else ""
+                http_link_port = inbound_ports[0][1] if (RUN_MODE == "direct" and inbound_ports[0][1] in (80, 8080, 8880, 2052, 2082, 2086, 2095)) else 80
 
                 def add_vless_link(sni, transport, label):
                     params = f"type={'ws' if transport == 'websocket' else 'xhttp'}&encryption=none&security="
@@ -612,16 +625,16 @@ def main():
                             tls_params += "&alpn=h3%2Ch2"
                         link_name_443 = urllib.parse.quote(f"{tr_label} 443", safe="")
                         payloads.append(f"vless://{uuid_str}@{sni}:443?{params}{tls_params}#{link_name_443}")
-                    if PORT_MODE in ("80", "both") and RUN_MODE != "direct":
-                        link_name_80 = urllib.parse.quote(f"{tr_label} 80", safe="")
-                        payloads.append(f"vless://{uuid_str}@{sni}:80?{params}&path={encoded_path}&host={tunnel_host_info}{xhttp_params}#{link_name_80}")
+                    if PORT_MODE in ("80", "both"):
+                        link_name_80 = urllib.parse.quote(f"{tr_label} {http_link_port}", safe="")
+                        payloads.append(f"vless://{uuid_str}@{sni}:{http_link_port}?{params}&path={encoded_path}&host={tunnel_host_info}{xhttp_params}#{link_name_80}")
 
                 def add_vmess_links(sni, label):
                     vmess_path = "/vmess" if PROTOCOL == "both" else ws_path
                     if PORT_MODE in ("443", "both"):
                         payloads.append(build_vmess_link(sni, 443, tunnel_host_info, vmess_path, f"{label} VMess 443", True))
-                    if PORT_MODE in ("80", "both") and RUN_MODE != "direct":
-                        payloads.append(build_vmess_link(sni, 80, tunnel_host_info, vmess_path, f"{label} VMess 80", False))
+                    if PORT_MODE in ("80", "both"):
+                        payloads.append(build_vmess_link(sni, http_link_port, tunnel_host_info, vmess_path, f"{label} VMess {http_link_port}", False))
 
                 for sni_entry in fake_sni.split(","):
                     sni_entry = sni_entry.strip()
