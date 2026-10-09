@@ -431,20 +431,12 @@ def main():
             is_ws = b"upgrade: websocket" in data.lower()
             return is_vless_path, is_vmess, is_ws, len(data) == 0
 
-        def pipe_bytes(src, dst):
-            try:
-                while chunk := src.recv(65536):
-                    dst.sendall(chunk)
-            except OSError:
-                pass
-            finally:
-                try: src.shutdown(socket.SHUT_RD)
-                except OSError: pass
-                try: dst.shutdown(socket.SHUT_WR)
-                except OSError: pass
-
         def handle_demux_connection(client_conn, routes):
             backend_conn = None
+            try:
+                client_conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            except OSError:
+                pass
             try:
                 is_vless_path, is_vmess, is_ws, is_empty = peek_request_info(client_conn)
                 if is_empty:
@@ -457,14 +449,42 @@ def main():
                     target_port = routes["vless_xhttp"]
                 else:
                     target_port = routes.get("vless_ws") or routes.get("vmess_ws") or routes.get("vless_xhttp")
-                idle_timeout = 30.0 if target_port == routes.get("web_ui") else 180.0
+                idle_limit = 60.0 if target_port == routes.get("web_ui") else 300.0
                 backend_conn = socket.create_connection(("127.0.0.1", target_port), timeout=5)
-                client_conn.settimeout(idle_timeout)
-                backend_conn.settimeout(idle_timeout)
-                t = threading.Thread(target=pipe_bytes, args=(backend_conn, client_conn), daemon=True)
+                try:
+                    backend_conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                except OSError:
+                    pass
+                last_active = [time.monotonic()]
+                client_conn.settimeout(30.0)
+                backend_conn.settimeout(30.0)
+
+                def forward(src, dst):
+                    try:
+                        while True:
+                            try:
+                                chunk = src.recv(131072)
+                            except socket.timeout:
+                                if time.monotonic() - last_active[0] > idle_limit:
+                                    break
+                                continue
+                            if not chunk:
+                                break
+                            last_active[0] = time.monotonic()
+                            dst.sendall(chunk)
+                            last_active[0] = time.monotonic()
+                    except OSError:
+                        pass
+                    finally:
+                        try:
+                            dst.shutdown(socket.SHUT_WR)
+                        except OSError:
+                            pass
+
+                t = threading.Thread(target=forward, args=(backend_conn, client_conn), daemon=True)
                 t.start()
-                pipe_bytes(client_conn, backend_conn)
-                t.join(timeout=5.0)
+                forward(client_conn, backend_conn)
+                t.join()
             except OSError:
                 pass
             finally:
