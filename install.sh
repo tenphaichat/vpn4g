@@ -107,6 +107,7 @@ start_svc() {
 #!/usr/bin/env bash
 cd "$WORKDIR" || exit 1
 export PYTHONUNBUFFERED=1
+trap '' HUP
 trap 'if [ -n "\${CHILD_PID:-}" ]; then kill -INT "\$CHILD_PID" 2>/dev/null; pkill -TERM -P "\$CHILD_PID" 2>/dev/null; fi; exit 0' TERM INT EXIT
 while true; do
     echo "[\$(date '+%Y-%m-%d %H:%M:%S')] [SUPERVISOR] Starting: $EXECSTART" >> "$LOG_FILE"
@@ -120,7 +121,11 @@ RUNNER
     chmod +x "$RUNNER_FILE"
     : > "$LOG_FILE"
     ln -sf "$LOG_FILE" "${WORKDIR}/${SVC}.log" 2>/dev/null || true
-    nohup "$RUNNER_FILE" >/dev/null 2>&1 &
+    if command -v setsid >/dev/null 2>&1; then
+        setsid nohup "$RUNNER_FILE" >/dev/null 2>&1 < /dev/null &
+    else
+        nohup "$RUNNER_FILE" >/dev/null 2>&1 < /dev/null &
+    fi
     echo $! > "$PID_FILE"
     sleep 1
     is_running
@@ -180,15 +185,14 @@ if [ -f "$SRC_DIR/main.py" ] && [ -f "$SRC_DIR/run.sh" ] && [ "$SRC_DIR" != "$IN
     cp -rf "$SRC_DIR"/. "$INSTALL_DIR"/
     cd "$INSTALL_DIR"
 elif [ -d "$INSTALL_DIR/.git" ]; then
-    echo -e " ${GREEN}[OK]${NC} Found existing install at $INSTALL_DIR"
+    echo -e " ${GREEN}[OK]${NC} Updating existing install at $INSTALL_DIR from $REPO..."
     cd "$INSTALL_DIR"
+    git remote set-url origin "$REPO" 2>/dev/null || true
     git fetch --all -q 2>/dev/null || true
     git reset --hard origin/main -q 2>/dev/null || git pull --ff-only 2>/dev/null || true
-elif [ -f "$INSTALL_DIR/main.py" ] && [ -f "$INSTALL_DIR/run.sh" ]; then
-    echo -e " ${GREEN}[OK]${NC} Found existing install at $INSTALL_DIR"
-    cd "$INSTALL_DIR"
 else
-    echo -e " ${GREEN}[*]${NC} Cloning to $INSTALL_DIR..."
+    rm -rf "$INSTALL_DIR"
+    echo -e " ${GREEN}[*]${NC} Cloning $REPO to $INSTALL_DIR..."
     git clone "$REPO" "$INSTALL_DIR"
     cd "$INSTALL_DIR"
 fi
