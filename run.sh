@@ -299,9 +299,15 @@ load_existing(){
 }
 
 # ==================== Systemd & Container Supervisor ====================
+has_entrypoint(){
+    tr '\0' ' ' < /proc/1/cmdline 2>/dev/null | grep -q "entrypoint.sh"
+}
+
 svc_is_active(){
     if has_systemd; then
         systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null
+    elif has_entrypoint; then
+        pgrep -f "$SCRIPT_DIR/main.py" >/dev/null 2>&1
     else
         [ -f "$PID_FILE" ] || return 1
         local pid
@@ -313,6 +319,8 @@ svc_is_active(){
 svc_exists(){
     if has_systemd; then
         [ -f "$SERVICE_FILE" ]
+    elif has_entrypoint; then
+        return 0
     else
         [ -f "$RUNNER_FILE" ]
     fi
@@ -339,9 +347,10 @@ svc_stop(){
             pkill -KILL -P "$cpid" 2>/dev/null || true
         fi
     fi
-    pkill -f "$SCRIPT_DIR/main.py" 2>/dev/null || true
-    pkill -f "$SCRIPT_DIR/xray" 2>/dev/null || true
-    pkill -f "$SCRIPT_DIR/cloudflared" 2>/dev/null || true
+    pkill -9 -f "$SCRIPT_DIR/main.py" 2>/dev/null || true
+    pkill -9 -f "$SCRIPT_DIR/xray" 2>/dev/null || true
+    pkill -9 -f "$SCRIPT_DIR/cloudflared" 2>/dev/null || true
+    pkill -9 -x "tee" 2>/dev/null || true
     rm -f "$PID_FILE" "$CHILD_PID_FILE"
     return 0
 }
@@ -364,6 +373,11 @@ svc_start(){
     if has_systemd; then
         run_as_root systemctl start "$SERVICE_NAME" 2>/dev/null
         return $?
+    elif has_entrypoint; then
+        svc_stop
+        sleep 4
+        svc_is_active
+        return $?
     fi
     if [ ! -x "$RUNNER_FILE" ]; then
         install_service
@@ -385,6 +399,10 @@ svc_restart(){
     if has_systemd; then
         run_as_root systemctl restart "$SERVICE_NAME" 2>/dev/null
         sleep 2
+        svc_is_active
+    elif has_entrypoint; then
+        svc_stop
+        sleep 4
         svc_is_active
     else
         if [ ! -x "$RUNNER_FILE" ]; then
