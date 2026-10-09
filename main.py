@@ -542,14 +542,24 @@ def main():
                         if platform.system().lower() != "windows":
                             try:
                                 out = subprocess.check_output(["ss", "-tulpn", f"sport = :{port}"], text=True, stderr=subprocess.DEVNULL)
-                                m = re.search(r'users:\(\("([^"]+)"', out)
+                                m = re.search(r'users:\(\("([^"]+)",pid=(\d+)', out)
                                 if m:
-                                    holder = f" (đang bị chiếm bởi: {m.group(1)})"
+                                    holder = f" (đang bị chiếm bởi: {m.group(1)} PID {m.group(2)})"
                             except Exception:
                                 pass
+                        free_cf_ports = []
+                        for cf_p in (8880, 2052, 2082, 2086, 2095, 8080, 80):
+                            try:
+                                ts = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                                ts.bind(("0.0.0.0", cf_p))
+                                ts.close()
+                                free_cf_ports.append(str(cf_p))
+                            except OSError:
+                                pass
+                        free_hint = f" Các cổng Cloudflare đang TRỐNG trên VPS: {', '.join(free_cf_ports)}." if free_cf_ports else ""
                         wait_for_config_fix(
-                            f"[ERROR] Không thể mở cổng demux {ip}:{port}{holder}: {error}. "
-                            f"Nếu VPS đang chạy web (nginx/apache) ở cổng 80, hãy dùng Mode 2 (Named Tunnel) hoặc đổi cổng Mode 3 sang 0.0.0.0:8080!"
+                            f"[ERROR] Không thể mở cổng demux {ip}:{port}{holder}: {error}.{free_hint} "
+                            f"Hãy đổi sang cổng trống (VD: 0.0.0.0:{free_cf_ports[0] if free_cf_ports else '2052'}) hoặc dùng Mode 2 (Named Tunnel)!"
                         )
                         break
                 if len(demux_listeners) != len(demux_intents):

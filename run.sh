@@ -361,13 +361,13 @@ svc_stop(){
 tune_network_sysctl(){
     $IS_TERMUX && return 0
     if command -v iptables >/dev/null 2>&1; then
-        for p in 9999 8080 80 443; do
+        for p in 9999 8080 8880 2052 2082 2086 2095 80 443; do
             run_as_root iptables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || \
                 run_as_root iptables -I INPUT 1 -p tcp --dport "$p" -j ACCEPT 2>/dev/null || true
         done
     fi
     if command -v ufw >/dev/null 2>&1 && run_as_root ufw status 2>/dev/null | grep -q "Status: active"; then
-        for p in 9999 8080 80 443; do
+        for p in 9999 8080 8880 2052 2082 2086 2095 80 443; do
             run_as_root ufw allow "${p}/tcp" >/dev/null 2>&1 || true
         done
     fi
