@@ -34,6 +34,10 @@ except ImportError:
                     os.environ[_k] = _v
         return True
 import threading
+try:
+    threading.stack_size(262144)
+except (ValueError, RuntimeError):
+    pass
 import subprocess
 import platform
 import uuid
@@ -440,26 +444,36 @@ def main():
                 except OSError: pass
 
         def handle_demux_connection(client_conn, routes):
-            is_vless_path, is_vmess, is_ws, is_empty = peek_request_info(client_conn)
-            if is_empty:
-                client_conn.close()
-                return
-            if is_vmess and "vmess_ws" in routes:
-                target_port = routes["vmess_ws"]
-            elif not is_vless_path and not is_vmess and "web_ui" in routes:
-                target_port = routes["web_ui"]
-            elif not is_ws and "vless_xhttp" in routes:
-                target_port = routes["vless_xhttp"]
-            else:
-                target_port = routes.get("vless_ws") or routes.get("vmess_ws") or routes.get("vless_xhttp")
+            backend_conn = None
             try:
+                is_vless_path, is_vmess, is_ws, is_empty = peek_request_info(client_conn)
+                if is_empty:
+                    return
+                if is_vmess and "vmess_ws" in routes:
+                    target_port = routes["vmess_ws"]
+                elif not is_vless_path and not is_vmess and "web_ui" in routes:
+                    target_port = routes["web_ui"]
+                elif not is_ws and "vless_xhttp" in routes:
+                    target_port = routes["vless_xhttp"]
+                else:
+                    target_port = routes.get("vless_ws") or routes.get("vmess_ws") or routes.get("vless_xhttp")
+                idle_timeout = 30.0 if target_port == routes.get("web_ui") else 180.0
                 backend_conn = socket.create_connection(("127.0.0.1", target_port), timeout=5)
-                backend_conn.settimeout(None)
+                client_conn.settimeout(idle_timeout)
+                backend_conn.settimeout(idle_timeout)
+                t = threading.Thread(target=pipe_bytes, args=(backend_conn, client_conn), daemon=True)
+                t.start()
+                pipe_bytes(client_conn, backend_conn)
+                t.join(timeout=5.0)
             except OSError:
-                client_conn.close()
-                return
-            threading.Thread(target=pipe_bytes, args=(client_conn, backend_conn), daemon=True).start()
-            threading.Thread(target=pipe_bytes, args=(backend_conn, client_conn), daemon=True).start()
+                pass
+            finally:
+                for conn in (client_conn, backend_conn):
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except OSError:
+                            pass
 
         def start_demux_server(listen_ip, listen_port, routes):
             server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
