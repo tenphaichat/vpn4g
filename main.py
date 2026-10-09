@@ -114,8 +114,8 @@ def main():
         else:
             print("[*] Found .env configuration.")
 
-    IS_RAILWAY = bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID") or os.getenv("RAILWAY_SERVICE_ID") or os.getenv("RAILWAY_PUBLIC_DOMAIN"))
-    RAILWAY_WEB_PORT = os.getenv("PORT") if IS_RAILWAY else None
+    IS_RAILWAY = False
+    RAILWAY_WEB_PORT = None
 
     init_env_file()
     load_dotenv(override=True)
