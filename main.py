@@ -257,8 +257,8 @@ def main():
         XHTTP_MODE = (get_os_env("XHTTP_MODE") or "packet-up").strip().lower()
         if XHTTP_MODE not in {"packet-up", "stream-up", "stream-one"}:
             XHTTP_MODE = "packet-up"
-        if "xhttp" in TRANSPORTS and RUN_MODE == "named_tunnel" and XHTTP_MODE != "packet-up":
-            logger_push(f"[INFO] Cloudflare Named Tunnel yêu cầu xHTTP mode 'packet-up' (chế độ '{XHTTP_MODE}' bị Cloudflare chặn/treo luồng upload). Đã tự động chuyển sang 'packet-up'.", "INFO")
+        if "xhttp" in TRANSPORTS and RUN_MODE in ("named_tunnel", "direct") and XHTTP_MODE != "packet-up":
+            logger_push(f"[INFO] Qua Cloudflare (Tunnel / CDN Flexible) yêu cầu xHTTP mode 'packet-up' (chế độ '{XHTTP_MODE}' bị Cloudflare chặn luồng upload). Đã tự động chuyển sang 'packet-up'.", "INFO")
             XHTTP_MODE = "packet-up"
 
         inbound_ports = []
@@ -279,15 +279,73 @@ def main():
         if not inbound_ports:
             inbound_ports = [("127.0.0.1", 8888)]
 
+        if RUN_MODE == "direct":
+            direct_ip, direct_port = inbound_ports[0]
+            # Neu cong direct_port (VD: 80 hoac 8080) dang bi chiem boi Nginx/Backend, tu dong chuyen sang cong trong (VD: 2052)
+            try:
+                _ts = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                _ts.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                _ts.bind((direct_ip if direct_ip != "0.0.0.0" else "", direct_port))
+                _ts.close()
+            except OSError:
+                for _alt_p in (2052, 8880, 2082, 2086, 2095):
+                    try:
+                        _ts2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        _ts2.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        _ts2.bind(("", _alt_p))
+                        _ts2.close()
+                        logger_push(f"[INFO] Cổng {direct_port} đang bận bởi Web Server, hệ thống tự động chuyển sang cổng nội bộ {_alt_p}.", "INFO")
+                        direct_port = _alt_p
+                        inbound_ports[0] = (direct_ip, direct_port)
+                        break
+                    except OSError:
+                        pass
+
+            # Neu VPS dang chay Nginx o cong 80, tu dong tao vhost Nginx cho WS_HOST de Cloudflare Flexible (Port 80) chuyen thang vao Xray!
+            if direct_port != 80 and platform.system().lower() == "linux" and WS_HOST and WS_HOST != "trycloudflare.com" and os.path.isdir("/etc/nginx/conf.d"):
+                nginx_conf_path = "/etc/nginx/conf.d/xray-vless.conf"
+                nginx_vhost = (
+                    "map $http_upgrade $xray_connection_upgrade {\n"
+                    "    default upgrade;\n"
+                    "    ''      '';\n"
+                    "}\n\n"
+                    "server {\n"
+                    "    listen 80;\n"
+                    f"    server_name {WS_HOST};\n\n"
+                    "    client_max_body_size 0;\n"
+                    "    proxy_buffering off;\n"
+                    "    proxy_request_buffering off;\n\n"
+                    "    location / {\n"
+                    f"        proxy_pass http://127.0.0.1:{direct_port};\n"
+                    "        proxy_http_version 1.1;\n"
+                    "        proxy_set_header Upgrade $http_upgrade;\n"
+                    "        proxy_set_header Connection $xray_connection_upgrade;\n"
+                    "        proxy_set_header Host $host;\n"
+                    "        proxy_set_header X-Real-IP $remote_addr;\n"
+                    "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+                    "        proxy_read_timeout 86400s;\n"
+                    "        proxy_send_timeout 86400s;\n"
+                    "    }\n"
+                    "}\n"
+                )
+                try:
+                    with open(nginx_conf_path, "w", encoding="utf-8") as nf:
+                        nf.write(nginx_vhost)
+                    if subprocess.run(["nginx", "-t"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                        subprocess.run(["nginx", "-s", "reload"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        logger_push(
+                            f"[SUCCESS] Đã tự động gắn tên miền {WS_HOST} vào Nginx (cổng 80 -> 127.0.0.1:{direct_port}). "
+                            f"Cloudflare Flexible hoạt động ngay lập tức mà KHÔNG cần tạo Origin Rule và KHÔNG ảnh hưởng website chính!",
+                            "SUCCESS"
+                        )
+                    else:
+                        os.remove(nginx_conf_path)
+                except Exception as e:
+                    print(f"[!] Could not auto-configure nginx: {e}")
+
         CLOUDFLARE_TARGET_IP, CLOUDFLARE_TARGET_PORT = inbound_ports[0]
         if CLOUDFLARE_TARGET_IP == "0.0.0.0":
             CLOUDFLARE_TARGET_IP = "127.0.0.1"
-
-        if RUN_MODE == "direct":
-            direct_ip, direct_port = inbound_ports[0]
-            if direct_port != 80:
-                print(f"[!] DIRECT MODE: origin is listening on port {direct_port}. Cloudflare Flexible expects an HTTP origin on port 80.")
-            print("[!] DIRECT MODE: origin leg is plaintext HTTP transport (WS/xHTTP, no TLS). Set Cloudflare SSL/TLS to 'Flexible'.")
 
         def send_webhook(data):
             if not WEBHOOK_URL:
@@ -623,7 +681,7 @@ def main():
                 payloads = []
                 country_flag = flag_emoji(COUNTRY_CODE)
                 country_prefix = f"[{country_flag}] {COUNTRY_CODE} | " if country_flag else ""
-                http_link_port = inbound_ports[0][1] if (RUN_MODE == "direct" and inbound_ports[0][1] in (80, 8080, 8880, 2052, 2082, 2086, 2095)) else 80
+                http_link_port = 80
 
                 def add_vless_link(sni, transport, label):
                     params = f"type={'ws' if transport == 'websocket' else 'xhttp'}&encryption=none&security="
