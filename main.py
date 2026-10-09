@@ -454,6 +454,7 @@ def main():
                 target_port = routes.get("vless_ws") or routes.get("vmess_ws") or routes.get("vless_xhttp")
             try:
                 backend_conn = socket.create_connection(("127.0.0.1", target_port), timeout=5)
+                backend_conn.settimeout(None)
             except OSError:
                 client_conn.close()
                 return
