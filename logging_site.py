@@ -415,11 +415,37 @@ LOGGING_HTML_TEMPLATE = """
             setTimeout(() => { if (el.innerText === msg) el.innerText = ""; }, 6000);
         }
 
+        function fallbackCopyText(text, done) {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            ta.setAttribute("readonly", "");
+            ta.style.position = "fixed";
+            ta.style.top = "-9999px";
+            ta.style.left = "-9999px";
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            ta.setSelectionRange(0, text.length);
+            try {
+                document.execCommand("copy");
+            } catch (e) {}
+            document.body.removeChild(ta);
+            if (done) done();
+        }
+
         function copyText(text, btn) {
-            navigator.clipboard.writeText(text);
-            const old = btn.innerText;
-            btn.innerText = "Đã copy!";
-            setTimeout(() => btn.innerText = old, 1500);
+            if (!text) return;
+            const done = () => {
+                if (!btn) return;
+                const old = btn.innerText;
+                btn.innerText = "✅ Đã copy!";
+                setTimeout(() => { btn.innerText = old; }, 1500);
+            };
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopyText(text, done));
+            } else {
+                fallbackCopyText(text, done);
+            }
         }
 
         function copyAllLinks() {
@@ -443,15 +469,21 @@ LOGGING_HTML_TEMPLATE = """
                 document.getElementById("cfg-TUNNEL_TOKEN").focus();
                 return;
             }
+            let b = new Array(16).fill(0);
             if (window.crypto && window.crypto.subtle) {
                 const buf = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode("vpn4g-cluster:" + token));
-                const b = Array.from(new Uint8Array(buf)).slice(0, 16);
-                b[6] = (b[6] & 0x0f) | 0x50;
-                b[8] = (b[8] & 0x3f) | 0x80;
-                const h = b.map(x => x.toString(16).padStart(2, "0")).join("");
-                document.getElementById("cfg-XRAY_UUID").value = `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20,32)}`;
-                showToast("🔗 Đã tạo UUID cố định theo Tunnel Token!");
+                b = Array.from(new Uint8Array(buf)).slice(0, 16);
+            } else {
+                const s = "vpn4g-cluster:" + token;
+                for (let i = 0; i < s.length; i++) {
+                    b[i % 16] = (b[i % 16] * 31 + s.charCodeAt(i) + i) & 0xff;
+                }
             }
+            b[6] = (b[6] & 0x0f) | 0x50;
+            b[8] = (b[8] & 0x3f) | 0x80;
+            const h = b.map(x => x.toString(16).padStart(2, "0")).join("");
+            document.getElementById("cfg-XRAY_UUID").value = `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20,32)}`;
+            showToast("🔗 Đã tạo UUID cố định theo Tunnel Token!");
         }
 
         function copyClusterCode(btn) {
