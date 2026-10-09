@@ -1085,9 +1085,21 @@ class RealtimeLogger:
                 except Exception:
                     return False
 
+            def _send_bytes(self, status, content_type, body, extra_headers=None):
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Connection", "close")
+                if extra_headers:
+                    for k, v in extra_headers.items():
+                        self.send_header(k, v)
+                self.end_headers()
+                self.wfile.write(body)
+
             def do_HEAD(self):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Connection", "close")
                 self.end_headers()
 
             def do_GET(self):
@@ -1104,52 +1116,34 @@ class RealtimeLogger:
                         body = (raw_text + "\n").encode("utf-8")
                     else:
                         body = base64.b64encode(raw_text.encode("utf-8"))
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/plain; charset=utf-8")
-                    self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
-                    self.send_header("Profile-Update-Interval", "1")
-                    self.send_header("Subscription-Userinfo", "upload=0; download=0; total=10737418240000; expire=0")
-                    self.end_headers()
-                    self.wfile.write(body)
+                    self._send_bytes(200, "text/plain; charset=utf-8", body, {
+                        "Cache-Control": "no-store, no-cache, must-revalidate",
+                        "Profile-Update-Interval": "1",
+                        "Subscription-Userinfo": "upload=0; download=0; total=10737418240000; expire=0"
+                    })
                     return
 
                 if not self.check_auth():
-                    self.send_response(401)
-                    self.send_header("WWW-Authenticate", 'Basic realm="Login Required"')
-                    self.end_headers()
-                    self.wfile.write(b"Unauthorized")
+                    self._send_bytes(401, "text/plain; charset=utf-8", b"Unauthorized", {
+                        "WWW-Authenticate": 'Basic realm="Login Required"'
+                    })
                     return
 
                 if parsed.path == "/":
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/html; charset=utf-8")
-                    self.end_headers()
-                    self.wfile.write(LOGGING_HTML_TEMPLATE.encode("utf-8"))
+                    self._send_bytes(200, "text/html; charset=utf-8", LOGGING_HTML_TEMPLATE.encode("utf-8"))
 
                 elif parsed.path == "/server_info":
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json; charset=utf-8")
-                    self.end_headers()
-                    self.wfile.write(json.dumps(logger_ref.get_server_info()).encode("utf-8"))
+                    self._send_bytes(200, "application/json; charset=utf-8", json.dumps(logger_ref.get_server_info()).encode("utf-8"))
 
                 elif parsed.path == "/speedtest":
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json; charset=utf-8")
-                    self.end_headers()
-                    self.wfile.write(json.dumps(logger_ref.run_server_speedtest()).encode("utf-8"))
+                    self._send_bytes(200, "application/json; charset=utf-8", json.dumps(logger_ref.run_server_speedtest()).encode("utf-8"))
 
                 elif parsed.path == "/links":
                     links = logger_ref.get_links_list()
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json; charset=utf-8")
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"links": links}).encode("utf-8"))
+                    self._send_bytes(200, "application/json; charset=utf-8", json.dumps({"links": links}).encode("utf-8"))
 
                 elif parsed.path == "/config":
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json; charset=utf-8")
-                    self.end_headers()
-                    self.wfile.write(json.dumps(logger_ref.get_env_config()).encode("utf-8"))
+                    self._send_bytes(200, "application/json; charset=utf-8", json.dumps(logger_ref.get_env_config()).encode("utf-8"))
 
                 elif parsed.path == "/logs":
                     query = parse_qs(parsed.query)
@@ -1157,21 +1151,16 @@ class RealtimeLogger:
                     with logger_ref._lock:
                         new_logs = [l for l in logger_ref.logs if l["id"] > last_id]
                         resp = {"new_logs": new_logs, "last_id": logger_ref.log_sequence}
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json; charset=utf-8")
-                    self.end_headers()
-                    self.wfile.write(json.dumps(resp).encode("utf-8"))
+                    self._send_bytes(200, "application/json; charset=utf-8", json.dumps(resp).encode("utf-8"))
 
                 else:
-                    self.send_response(404)
-                    self.end_headers()
+                    self._send_bytes(404, "text/plain; charset=utf-8", b"Not Found")
 
             def do_POST(self):
                 if not self.check_auth():
-                    self.send_response(401)
-                    self.send_header("WWW-Authenticate", 'Basic realm="Login Required"')
-                    self.end_headers()
-                    self.wfile.write(b"Unauthorized")
+                    self._send_bytes(401, "text/plain; charset=utf-8", b"Unauthorized", {
+                        "WWW-Authenticate": 'Basic realm="Login Required"'
+                    })
                     return
 
                 parsed = urlparse(self.path)
@@ -1190,10 +1179,7 @@ class RealtimeLogger:
                     )
                     if logger_ref.action_callback:
                         threading.Thread(target=logger_ref.action_callback, args=("reload_config", cfg), daemon=True).start()
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json; charset=utf-8")
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"status": "ok", "message": "✅ Đã lưu cấu hình & đang khởi động lại Xray!"}).encode("utf-8"))
+                    self._send_bytes(200, "application/json; charset=utf-8", json.dumps({"status": "ok", "message": "✅ Đã lưu cấu hình & đang khởi động lại Xray!"}).encode("utf-8"))
 
                 elif parsed.path == "/action":
                     act = data.get("action", "")
@@ -1214,14 +1200,10 @@ class RealtimeLogger:
                     if logger_ref.action_callback:
                         threading.Thread(target=logger_ref.action_callback, args=(act, data), daemon=True).start()
 
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json; charset=utf-8")
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"status": "ok", "message": msg}).encode("utf-8"))
+                    self._send_bytes(200, "application/json; charset=utf-8", json.dumps({"status": "ok", "message": msg}).encode("utf-8"))
 
                 else:
-                    self.send_response(404)
-                    self.end_headers()
+                    self._send_bytes(404, "text/plain; charset=utf-8", b"Not Found")
 
         return WebHandler
 
