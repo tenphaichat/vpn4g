@@ -105,17 +105,27 @@ LOGGING_HTML_TEMPLATE = """
     </style>
 </head>
 <body>
-    <!-- CARD 1: SPEEDTEST & SERVER REGION -->
+    <!-- CARD 1: SPEEDTEST, RAM & SERVER REGION -->
     <div class="card">
         <h2>
-            <span>⚡ Speedtest & Vị trí Máy chủ (Railway / VPS)</span>
-            <button class="btn" onclick="runSpeedtest()" id="speedtest-btn">Chạy Speedtest Server</button>
+            <span>⚡ Speedtest, RAM & Vị trí Máy chủ (Railway / VPS)</span>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button class="btn btn-purple" onclick="checkRamNow(this)" id="ram-btn">🧠 Check RAM</button>
+                <button class="btn" onclick="runSpeedtest()" id="speedtest-btn">Chạy Speedtest Server</button>
+            </div>
         </h2>
         <div id="region-warn" style="display:none;" class="badge-warn"></div>
         <div class="speed-grid">
             <div class="speed-box">
                 <div class="speed-label">Vị trí Server (Region)</div>
                 <div class="speed-val" id="srv-loc" style="font-size:14px;">Đang kiểm tra...</div>
+            </div>
+            <div class="speed-box">
+                <div class="speed-label">RAM Máy chủ (Đã dùng / Tổng)</div>
+                <div class="speed-val" id="srv-ram" style="font-size:15px;">-- / -- MB</div>
+                <div style="background:#1e293b; height:6px; border-radius:999px; margin-top:6px; overflow:hidden;">
+                    <div id="srv-ram-bar" style="width:0%; height:100%; background:#10b981; transition:0.3s;"></div>
+                </div>
             </div>
             <div class="speed-box">
                 <div class="speed-label">Ping (Cloudflare)</div>
@@ -772,6 +782,35 @@ LOGGING_HTML_TEMPLATE = """
             }
         }
 
+        function updateRamDisplay(ram) {
+            if (!ram || !ram.total_mb) return;
+            const el = document.getElementById("srv-ram");
+            const bar = document.getElementById("srv-ram-bar");
+            if (el) {
+                el.innerText = `${ram.used_mb} / ${ram.total_mb} MB (${ram.percent}%)`;
+                el.style.color = ram.percent > 85 ? "#f87171" : (ram.percent > 70 ? "#fbbf24" : "#38bdf8");
+            }
+            if (bar) {
+                bar.style.width = `${Math.min(100, Math.max(0, ram.percent))}%`;
+                bar.style.background = ram.percent > 85 ? "#ef4444" : (ram.percent > 70 ? "#f59e0b" : "#10b981");
+            }
+        }
+
+        async function checkRamNow(btn) {
+            const old = btn ? btn.innerText : "";
+            if (btn) { btn.disabled = true; btn.innerText = "⏳ Đang đo RAM..."; }
+            try {
+                const res = await fetch("/ram?log=1");
+                const d = await res.json();
+                updateRamDisplay(d);
+                showToast(`🧠 RAM: ${d.used_mb} / ${d.total_mb} MB (${d.percent}%) - Trống: ${d.free_mb} MB`);
+            } catch (e) {
+                showToast("❌ Không thể đọc thông tin RAM", true);
+            } finally {
+                if (btn) { btn.disabled = false; btn.innerText = old; }
+            }
+        }
+
         async function fetchServerInfo() {
             try {
                 const res = await fetch("/server_info");
@@ -779,6 +818,7 @@ LOGGING_HTML_TEMPLATE = """
                 detectedCountry = d.country || "";
                 detectedIp = d.ip || "";
                 document.getElementById("srv-loc").innerText = `${d.city || "?"} (${d.country || "?"}) - ${d.ip || ""}`;
+                if (d.ram) updateRamDisplay(d.ram);
                 const ipHint = document.getElementById("direct-ip-hint");
                 if (ipHint && d.ip) ipHint.innerText = d.ip;
                 if (d.country && !["SG", "VN", "HK", "JP", "TW"].includes(d.country)) {
@@ -802,6 +842,7 @@ LOGGING_HTML_TEMPLATE = """
                 document.getElementById("st-ping").innerText = `${d.ping_ms} ms`;
                 document.getElementById("st-down").innerText = `${d.download_mbps} Mbps`;
                 document.getElementById("st-up").innerText = `${d.upload_mbps} Mbps`;
+                if (d.ram) updateRamDisplay(d.ram);
             } catch (e) {
                 document.getElementById("st-down").innerText = "Lỗi";
             } finally {
@@ -848,6 +889,7 @@ LOGGING_HTML_TEMPLATE = """
             try {
                 const res = await fetch(`/logs?last_id=${lastLogId}`);
                 const data = await res.json();
+                if (data.ram) updateRamDisplay(data.ram);
                 if (data.new_logs.length > 0) {
                     if (logContainer.innerText.includes("Đang chờ")) logContainer.innerHTML = "";
                     logContainer.insertAdjacentHTML('beforeend', data.new_logs.map(formatLog).join(""));
@@ -972,23 +1014,84 @@ class RealtimeLogger:
             f.write("\n".join(lines) + "\n")
         return cfg
 
-    def get_server_info(self):
-        if self._cached_info:
-            return self._cached_info
+    def get_ram_info(self):
         try:
-            req = urllib.request.Request("https://ipinfo.io/json", headers={"User-Agent": "curl/8.0"})
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                self._cached_info = {
-                    "ip": data.get("ip", ""),
-                    "city": data.get("city", ""),
-                    "region": data.get("region", ""),
-                    "country": data.get("country", ""),
-                    "org": data.get("org", "")
-                }
-                return self._cached_info
+            # Check Linux cgroup v2 / v1 container memory limits first (e.g. Railway)
+            if os.path.exists("/proc/meminfo"):
+                mem = {}
+                with open("/proc/meminfo", "r", encoding="utf-8") as f:
+                    for line in f:
+                        parts = line.split(":")
+                        if len(parts) == 2:
+                            k = parts[0].strip()
+                            v = int(parts[1].strip().split()[0]) * 1024
+                            mem[k] = v
+                total_b = mem.get("MemTotal", 0)
+                avail_b = mem.get("MemAvailable", mem.get("MemFree", 0) + mem.get("Buffers", 0) + mem.get("Cached", 0))
+                used_b = max(0, total_b - avail_b)
+
+                # Check if container cgroup has a stricter limit than host RAM
+                try:
+                    if os.path.exists("/sys/fs/cgroup/memory.max") and os.path.exists("/sys/fs/cgroup/memory.current"):
+                        raw_max = open("/sys/fs/cgroup/memory.max", "r").read().strip()
+                        if raw_max.isdigit():
+                            cg_max = int(raw_max)
+                            if 0 < cg_max < total_b:
+                                total_b = cg_max
+                                used_b = int(open("/sys/fs/cgroup/memory.current", "r").read().strip())
+                except Exception:
+                    pass
+
+                total_mb = max(1, round(total_b / (1024 * 1024)))
+                used_mb = min(total_mb, round(used_b / (1024 * 1024)))
+                free_mb = max(0, total_mb - used_mb)
+                percent = round((used_mb / total_mb) * 100, 1)
+                return {"used_mb": used_mb, "total_mb": total_mb, "free_mb": free_mb, "percent": percent}
+
+            if os.name == "nt":
+                import ctypes
+                class MEMORYSTATUSEX(ctypes.Structure):
+                    _fields_ = [
+                        ("dwLength", ctypes.c_ulong),
+                        ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                    ]
+                stat = MEMORYSTATUSEX()
+                stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+                ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
+                total_mb = max(1, round(stat.ullTotalPhys / (1024 * 1024)))
+                free_mb = round(stat.ullAvailPhys / (1024 * 1024))
+                used_mb = max(0, total_mb - free_mb)
+                percent = round((used_mb / total_mb) * 100, 1)
+                return {"used_mb": used_mb, "total_mb": total_mb, "free_mb": free_mb, "percent": percent}
         except Exception:
-            return {"ip": "Unknown", "city": "Unknown", "country": "?"}
+            pass
+        return {"used_mb": 0, "total_mb": 0, "free_mb": 0, "percent": 0.0}
+
+    def get_server_info(self):
+        if not self._cached_info:
+            try:
+                req = urllib.request.Request("https://ipinfo.io/json", headers={"User-Agent": "curl/8.0"})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    self._cached_info = {
+                        "ip": data.get("ip", ""),
+                        "city": data.get("city", ""),
+                        "region": data.get("region", ""),
+                        "country": data.get("country", ""),
+                        "org": data.get("org", "")
+                    }
+            except Exception:
+                self._cached_info = {"ip": "Unknown", "city": "Unknown", "country": "?"}
+        info = dict(self._cached_info)
+        info["ram"] = self.get_ram_info()
+        return info
 
     def run_server_speedtest(self):
         pings = []
@@ -1062,8 +1165,9 @@ class RealtimeLogger:
         el_ul = max(time.perf_counter() - t_start_ul, 0.1)
         upload_mbps = round((ul_bytes[0] * 8) / (el_ul * 1_000_000), 1)
 
-        res = {"ping_ms": ping_ms, "download_mbps": download_mbps, "upload_mbps": upload_mbps}
-        self.push_log(f"[SPEEDTEST] Ping: {ping_ms} ms | Download: {download_mbps} Mbps | Upload: {upload_mbps} Mbps", "SUCCESS")
+        ram = self.get_ram_info()
+        res = {"ping_ms": ping_ms, "download_mbps": download_mbps, "upload_mbps": upload_mbps, "ram": ram}
+        self.push_log(f"[SPEEDTEST] Ping: {ping_ms} ms | Download: {download_mbps} Mbps | Upload: {upload_mbps} Mbps | RAM: {ram['used_mb']}/{ram['total_mb']} MB ({ram['percent']}%)", "SUCCESS")
         return res
 
     def _create_handler(self):
@@ -1135,6 +1239,13 @@ class RealtimeLogger:
                 elif parsed.path == "/server_info":
                     self._send_bytes(200, "application/json; charset=utf-8", json.dumps(logger_ref.get_server_info()).encode("utf-8"))
 
+                elif parsed.path == "/ram":
+                    query = parse_qs(parsed.query)
+                    ram = logger_ref.get_ram_info()
+                    if query.get("log", ["0"])[0] == "1":
+                        logger_ref.push_log(f"[RAM CHECK] Đang dùng: {ram['used_mb']} / {ram['total_mb']} MB ({ram['percent']}%) — Còn trống: {ram['free_mb']} MB", "INFO")
+                    self._send_bytes(200, "application/json; charset=utf-8", json.dumps(ram).encode("utf-8"))
+
                 elif parsed.path == "/speedtest":
                     self._send_bytes(200, "application/json; charset=utf-8", json.dumps(logger_ref.run_server_speedtest()).encode("utf-8"))
 
@@ -1150,7 +1261,7 @@ class RealtimeLogger:
                     last_id = int(query.get("last_id", [0])[0])
                     with logger_ref._lock:
                         new_logs = [l for l in logger_ref.logs if l["id"] > last_id]
-                        resp = {"new_logs": new_logs, "last_id": logger_ref.log_sequence}
+                        resp = {"new_logs": new_logs, "last_id": logger_ref.log_sequence, "ram": logger_ref.get_ram_info()}
                     self._send_bytes(200, "application/json; charset=utf-8", json.dumps(resp).encode("utf-8"))
 
                 else:
