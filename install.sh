@@ -15,13 +15,13 @@ run_root() {
     if [ "$(id -u)" = "0" ]; then "$@"; else sudo "$@"; fi
 }
 
-# 1. Install git & essential process utilities if needed
-if ! command -v git >/dev/null 2>&1 || ! command -v pgrep >/dev/null 2>&1; then
-    echo -e " ${YELLOW}[!]${NC} Installing required packages (git, procps, python3-venv)..."
+# 1. Install git & essential process utilities + python deps if needed
+if ! command -v git >/dev/null 2>&1 || ! command -v pgrep >/dev/null 2>&1 || ! python3 -c "import dotenv, requests" >/dev/null 2>&1; then
+    echo -e " ${YELLOW}[!]${NC} Installing required packages (git, procps, python3-dotenv, python3-requests)..."
     if [ -n "${TERMUX_VERSION:-}" ] || [[ "${PREFIX:-}" == *"com.termux"* ]]; then
         pkg install -y git python
     elif command -v apt-get >/dev/null 2>&1; then
-        run_root apt-get update -qq && run_root apt-get install -y -qq git curl procps python3 python3-venv python3-pip
+        run_root apt-get update -qq && run_root apt-get install -y -qq git curl procps python3 python3-venv python3-pip python3-dotenv python3-requests
     elif command -v yum >/dev/null 2>&1; then
         run_root yum install -y git curl procps-ng python3 python3-pip
     fi

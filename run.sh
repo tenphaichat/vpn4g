@@ -212,35 +212,38 @@ install_venv_package(){
 
 ensure_python_deps(){
     local py="$1"
-    if "$py" -c "import dotenv, requests" 2>/dev/null; then return 0; fi
-    warn "Thieu Python dependencies. Dang cai..."
-
     if $IS_TERMUX; then
+        if "$py" -c "import dotenv, requests" 2>/dev/null; then return 0; fi
+        warn "Thieu Python dependencies. Dang cai..."
         if "$py" -m pip install --user -q python-dotenv requests; then
             "$py" -c "import dotenv, requests" 2>/dev/null && { ok "Da cai dependencies can thiet."; return 0; }
         fi
         err "Cai dependencies can thiet that bai. Kiem tra ket noi mang roi thu lai."
         return 1
     fi
-    if "$py" -c 'import sys; sys.exit(0 if hasattr(sys, "real_prefix") or (hasattr(sys, "base_prefix") and sys.base_prefix != sys.prefix) else 1)' 2>/dev/null; then
-        if "$py" -m pip install -q python-dotenv requests 2>&1 | tail -3; then
-            "$py" -c "import dotenv, requests" 2>/dev/null && { ok "Deps installed."; return 0; }
-        fi
-        if [[ "$py" = "$SCRIPT_DIR/.venv/"* ]]; then
-            warn ".venv bi loi. Dang tao lai..."
-            rm -rf "$SCRIPT_DIR/.venv"
-            py="$(command -v python3 2>/dev/null || command -v python 2>/dev/null)"
-            [ -z "$py" ] && { err "Khong co Python3 he thong."; return 1; }
-        else
-            err "pip that bai trong venv ben ngoai."; return 1
+
+    # Tren Linux/Ubuntu, systemd chay duoi quyen root nen phai kiem tra bang run_as_root hoac dung .venv
+    if [[ "$py" = "$SCRIPT_DIR/.venv/"* ]]; then
+        if "$py" -c "import dotenv, requests" 2>/dev/null; then return 0; fi
+    else
+        if run_as_root "$py" -c "import dotenv, requests" 2>/dev/null; then return 0; fi
+    fi
+    warn "Thieu Python dependencies. Dang cai..."
+
+    if command -v apt-get >/dev/null 2>&1; then
+        run_as_root apt-get update -qq 2>/dev/null || true
+        run_as_root apt-get install -y -qq python3-dotenv python3-requests python3-pip python3-venv >/dev/null 2>&1 || true
+        if run_as_root "$py" -c "import dotenv, requests" 2>/dev/null; then
+            ok "Da cai dependencies qua apt."
+            return 0
         fi
     fi
 
-    if "$py" -m pip install --user -q python-dotenv requests 2>/dev/null; then
-        "$py" -c "import dotenv, requests" 2>/dev/null && { ok "Da cai dependencies (--user)."; return 0; }
-    fi
-    if "$py" -m pip install --break-system-packages -q python-dotenv requests 2>/dev/null; then
-        "$py" -c "import dotenv, requests" 2>/dev/null && { ok "Deps installed."; return 0; }
+    if run_as_root "$py" -m pip install -q python-dotenv requests 2>/dev/null || run_as_root "$py" -m pip install --break-system-packages -q python-dotenv requests 2>/dev/null; then
+        if run_as_root "$py" -c "import dotenv, requests" 2>/dev/null; then
+            ok "Deps installed."
+            return 0
+        fi
     fi
 
     info "Dang tao .venv..."

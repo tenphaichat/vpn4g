@@ -1,5 +1,14 @@
 import os
 import sys
+import glob
+
+# Ensure .venv and local user site-packages (when systemd runs as root inside /home/<user>/vless) are in sys.path
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_parent_home = os.path.dirname(_script_dir)
+for _sp in glob.glob(os.path.join(_script_dir, ".venv", "lib", "python*", "site-packages")) + glob.glob(os.path.join(_parent_home, ".local", "lib", "python*", "site-packages")):
+    if os.path.isdir(_sp) and _sp not in sys.path:
+        sys.path.insert(0, _sp)
+
 import signal
 import json
 import re
@@ -8,7 +17,22 @@ import socket
 import base64
 from urllib import request
 from sys import prefix
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(dotenv_path=".env", override=False):
+        if not os.path.exists(dotenv_path):
+            return False
+        with open(dotenv_path, "r", encoding="utf-8") as _f:
+            for _line in _f:
+                _s = _line.strip()
+                if not _s or _s.startswith("#") or "=" not in _s:
+                    continue
+                _k, _v = _s.split("=", 1)
+                _k, _v = _k.strip(), _v.strip().strip("'\"")
+                if override or _k not in os.environ:
+                    os.environ[_k] = _v
+        return True
 import threading
 import subprocess
 import platform
