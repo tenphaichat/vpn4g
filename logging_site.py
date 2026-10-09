@@ -1341,7 +1341,9 @@ class RealtimeLogger:
         self.server_thread.start()
 
         self.extra_servers = []
-        for extra_port in (9999, 8080):
+        is_railway = bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID") or os.getenv("RAILWAY_SERVICE_ID") or os.getenv("RAILWAY_PUBLIC_DOMAIN"))
+        fallback_ports = (9999, 8080, 80, 3000, 5000) if is_railway else (9999, 8080)
+        for extra_port in fallback_ports:
             if extra_port != self.port:
                 try:
                     extra_srv = ThreadingHTTPServer(("0.0.0.0", extra_port), handler_cls)
@@ -1350,7 +1352,7 @@ class RealtimeLogger:
                 except Exception:
                     pass
 
-        return f"http://localhost:{self.port} (fallback: 9999, 8080)"
+        return f"http://localhost:{self.port} (fallback: {fallback_ports})"
 
     def stop(self):
         """Dừng server"""

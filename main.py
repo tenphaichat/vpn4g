@@ -131,7 +131,10 @@ def main():
     try:
         init_run_mode = (get_os_env("RUN_MODE") or "quick_tunnel").strip().lower()
         raw_web_port = os.getenv("WEB_PORT") or (RAILWAY_WEB_PORT if (IS_RAILWAY or init_run_mode != "direct") else None) or "9999"
-        web_port = int(raw_web_port) if str(raw_web_port).isdigit() else 9999
+        clean_web_port = str(raw_web_port).split(":")[-1].strip()
+        web_port = int(clean_web_port) if clean_web_port.isdigit() else 9999
+        if web_port == 8888:
+            web_port = 9999
         web_password = os.getenv("WEB_PASSWORD", "") or None
         logger = RealtimeLogger(port=web_port, password=web_password, action_callback=on_dashboard_action)
         logger_url = logger.start()
