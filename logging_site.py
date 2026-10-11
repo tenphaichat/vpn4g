@@ -9,7 +9,7 @@ import threading
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 DEFAULT_ENV_CONFIG = {
     "RUN_MODE": "quick_tunnel",
@@ -62,6 +62,18 @@ LOGGING_HTML_TEMPLATE = """
         .btn-purple:hover { background: #6d28d9; }
         .btn-amber { background: #d97706; }
         .btn-amber:hover { background: #b45309; }
+        .import-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+        .btn-import { font-size: 12px; padding: 7px 12px; font-weight: 600; border-radius: 6px; display: inline-flex; align-items: center; gap: 5px; }
+        .btn-sr { background: #0284c7; }
+        .btn-sr:hover { background: #0369a1; }
+        .btn-v2 { background: #059669; }
+        .btn-v2:hover { background: #047857; }
+        .btn-clash { background: #7c3aed; }
+        .btn-clash:hover { background: #6d28d9; }
+        .btn-singbox { background: #d97706; }
+        .btn-singbox:hover { background: #b45309; }
+        .btn-hiddify { background: #0891b2; }
+        .btn-hiddify:hover { background: #0e7490; }
         .speed-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 4px; }
         .speed-box { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 12px; text-align: center; }
         .speed-label { font-size: 12px; color: #94a3b8; margin-bottom: 4px; }
@@ -151,15 +163,22 @@ LOGGING_HTML_TEMPLATE = """
 
         <div class="sub-box">
             <div class="sub-title">
-                <span>📲 Link Sub Tự Động Cập Nhật (Shadowrocket / v2rayNG / v2rayN / NekoBox / Sing-box)</span>
+                <span>📲 Link Sub Tự Động Cập Nhật (Shadowrocket / v2rayNG / v2rayN / NekoBox / Sing-box / Clash)</span>
             </div>
             <div class="link-row" style="margin-bottom:0;">
                 <input class="link-input" readonly id="sub-url-input" value="" />
                 <button class="btn btn-green" onclick="copyText(document.getElementById('sub-url-input').value, this)">Copy Link Sub</button>
                 <button class="btn" onclick="window.open(document.getElementById('sub-url-input').value + '?raw=1', '_blank')">Xem Raw</button>
             </div>
+            <div class="import-grid">
+                <button class="btn btn-import btn-sr" onclick="quickImport('shadowrocket', this)">🚀 1-Click Shadowrocket</button>
+                <button class="btn btn-import btn-v2" onclick="quickImport('v2rayng', this)">🤖 1-Click v2rayNG</button>
+                <button class="btn btn-import btn-clash" onclick="quickImport('clash', this)">⚡ 1-Click Clash / Clash Meta</button>
+                <button class="btn btn-import btn-singbox" onclick="quickImport('singbox', this)">🦊 1-Click Sing-box</button>
+                <button class="btn btn-import btn-hiddify" onclick="quickImport('hiddify', this)">🌐 1-Click Hiddify / NekoBox</button>
+            </div>
             <div class="sub-hint">
-                💡 Dán <b>Link Sub</b> này vào app VPN 1 lần duy nhất. Khi đổi Tunnel mới hoặc tạo VMess/VLESS mới, bạn chỉ cần bấm <b>"Cập nhật Sub (Update Subscription)"</b> trên app là tự động lấy toàn bộ link mới!
+                💡 <b>Nhập nhanh:</b> Bấm các nút <b>1-Click</b> ở trên để tự động mở và nhập sub thẳng vào App VPN của bạn (hệ thống sẽ đồng thời tự copy sẵn link vào bộ nhớ tạm).
             </div>
         </div>
 
@@ -461,6 +480,50 @@ LOGGING_HTML_TEMPLATE = """
         function copyAllLinks() {
             if (!currentLinksText) return;
             copyText(currentLinksText, document.getElementById("copy-all-btn"));
+        }
+
+        function quickImport(client, btn) {
+            const subInput = document.getElementById("sub-url-input");
+            const subUrl = (subInput && subInput.value) ? subInput.value.trim() : (window.location.origin + "/sub");
+            const nodeName = "VPN-4G-" + (window.location.hostname || "Server");
+            let schemeUrl = "";
+            let copyTarget = subUrl;
+            let clientName = "";
+
+            if (client === "shadowrocket") {
+                clientName = "Shadowrocket";
+                const b64 = btoa(unescape(encodeURIComponent(subUrl)));
+                schemeUrl = "sub://" + b64;
+            } else if (client === "v2rayng") {
+                clientName = "v2rayNG";
+                schemeUrl = "v2rayng://install-sub?url=" + encodeURIComponent(subUrl) + "&name=" + encodeURIComponent(nodeName);
+            } else if (client === "clash") {
+                clientName = "Clash / Clash Meta";
+                const clashUrl = subUrl + (subUrl.includes("?") ? "&clash=1" : "?clash=1");
+                copyTarget = clashUrl;
+                schemeUrl = "clash://install-config?url=" + encodeURIComponent(clashUrl) + "&name=" + encodeURIComponent(nodeName);
+            } else if (client === "singbox") {
+                clientName = "Sing-box";
+                schemeUrl = "sing-box://import-remote-profile?url=" + encodeURIComponent(subUrl) + "#" + encodeURIComponent(nodeName);
+            } else if (client === "hiddify") {
+                clientName = "Hiddify / NekoBox";
+                schemeUrl = "hiddify://install-sub?url=" + encodeURIComponent(subUrl) + "#" + encodeURIComponent(nodeName);
+            }
+
+            copyText(copyTarget, null);
+            showToast("🚀 Đang mở " + clientName + "... (Đã tự động copy link sub vào clipboard)");
+
+            if (btn) {
+                const old = btn.innerText;
+                btn.innerText = "⏳ Đang mở app...";
+                setTimeout(() => { btn.innerText = old; }, 2000);
+            }
+
+            if (schemeUrl) {
+                setTimeout(() => {
+                    window.location.href = schemeUrl;
+                }, 100);
+            }
         }
 
         function randomizeUuidInput() {
@@ -910,6 +973,174 @@ LOGGING_HTML_TEMPLATE = """
 </html>
 """
 
+
+def generate_clash_yaml(links):
+    proxies = []
+    proxy_names = []
+    seen_names = set()
+
+    for idx, raw_link in enumerate(links, 1):
+        link = raw_link.strip()
+        if not link:
+            continue
+        try:
+            if link.startswith("vless://"):
+                parsed = urlparse(link)
+                uuid_str = parsed.username or (parsed.netloc.split("@")[0] if "@" in parsed.netloc else "")
+                server = parsed.hostname or ""
+                port = parsed.port or 443
+                query = parse_qs(parsed.query)
+                name = unquote(parsed.fragment) if parsed.fragment else f"VLESS-{idx}"
+                name = name.strip() or f"VLESS-{idx}"
+
+                unique_name = name
+                c = 2
+                while unique_name in seen_names:
+                    unique_name = f"{name} ({c})"
+                    c += 1
+                seen_names.add(unique_name)
+                proxy_names.append(unique_name)
+
+                security = (query.get("security", ["none"])[0] or "none").lower()
+                is_tls = (security == "tls")
+                host = query.get("host", [""])[0]
+                sni = query.get("sni", [""])[0] or host
+                path = query.get("path", ["/"])[0]
+                transport = (query.get("type", ["ws"])[0] or "ws").lower()
+
+                p = {
+                    "name": unique_name,
+                    "type": "vless",
+                    "server": server,
+                    "port": int(port),
+                    "uuid": uuid_str,
+                    "cipher": "auto",
+                    "udp": True,
+                    "tls": is_tls,
+                    "skip-cert-verify": True,
+                }
+                if sni:
+                    p["servername"] = sni
+                if transport == "ws":
+                    p["network"] = "ws"
+                    p["ws-opts"] = {
+                        "path": path,
+                        "headers": {"Host": host} if host else {}
+                    }
+                proxies.append(p)
+
+            elif link.startswith("vmess://"):
+                b64_str = link[8:].strip()
+                b64_str += "=" * ((4 - len(b64_str) % 4) % 4)
+                v_data = json.loads(base64.b64decode(b64_str).decode("utf-8", errors="ignore"))
+                name = v_data.get("ps", "").strip() or f"VMess-{idx}"
+
+                unique_name = name
+                c = 2
+                while unique_name in seen_names:
+                    unique_name = f"{name} ({c})"
+                    c += 1
+                seen_names.add(unique_name)
+                proxy_names.append(unique_name)
+
+                server = v_data.get("add", "")
+                port = int(v_data.get("port", 443))
+                uuid_str = v_data.get("id", "")
+                alter_id = int(v_data.get("aid", 0))
+                cipher = v_data.get("scy", "auto")
+                net = (v_data.get("net", "ws") or "ws").lower()
+                is_tls = (v_data.get("tls", "").lower() == "tls")
+                host = v_data.get("host", "")
+                path = v_data.get("path", "/")
+                sni = v_data.get("sni", "") or host
+
+                p = {
+                    "name": unique_name,
+                    "type": "vmess",
+                    "server": server,
+                    "port": port,
+                    "uuid": uuid_str,
+                    "alterId": alter_id,
+                    "cipher": cipher,
+                    "udp": True,
+                    "tls": is_tls,
+                    "skip-cert-verify": True,
+                }
+                if sni:
+                    p["servername"] = sni
+                if net == "ws":
+                    p["network"] = "ws"
+                    p["ws-opts"] = {
+                        "path": path,
+                        "headers": {"Host": host} if host else {}
+                    }
+                proxies.append(p)
+        except Exception:
+            continue
+
+    def esc(s):
+        return '"' + str(s).replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+    lines = [
+        "port: 7890",
+        "socks-port: 7891",
+        "allow-lan: false",
+        "mode: rule",
+        "log-level: info",
+        "external-controller: 127.0.0.1:9090",
+        "",
+        "proxies:",
+    ]
+
+    for p in proxies:
+        lines.append(f"  - name: {esc(p['name'])}")
+        lines.append(f"    type: {p['type']}")
+        lines.append(f"    server: {esc(p['server'])}")
+        lines.append(f"    port: {p['port']}")
+        lines.append(f"    uuid: {esc(p['uuid'])}")
+        if "alterId" in p:
+            lines.append(f"    alterId: {p['alterId']}")
+        lines.append(f"    cipher: {p.get('cipher', 'auto')}")
+        lines.append(f"    udp: {str(p.get('udp', True)).lower()}")
+        lines.append(f"    tls: {str(p.get('tls', False)).lower()}")
+        lines.append(f"    skip-cert-verify: {str(p.get('skip-cert-verify', True)).lower()}")
+        if "servername" in p and p["servername"]:
+            lines.append(f"    servername: {esc(p['servername'])}")
+        if p.get("network"):
+            lines.append(f"    network: {p['network']}")
+        if "ws-opts" in p:
+            lines.append("    ws-opts:")
+            lines.append(f"      path: {esc(p['ws-opts']['path'])}")
+            headers = p["ws-opts"].get("headers", {})
+            if headers:
+                lines.append("      headers:")
+                for hk, hv in headers.items():
+                    lines.append(f"        {hk}: {esc(hv)}")
+
+    lines.append("")
+    lines.append("proxy-groups:")
+    lines.append("  - name: PROXY")
+    lines.append("    type: select")
+    lines.append("    proxies:")
+    lines.append("      - AUTO")
+    for name in proxy_names:
+        lines.append(f"      - {esc(name)}")
+    lines.append("")
+    lines.append("  - name: AUTO")
+    lines.append("    type: url-test")
+    lines.append("    url: http://www.gstatic.com/generate_204")
+    lines.append("    interval: 300")
+    lines.append("    proxies:")
+    for name in proxy_names:
+        lines.append(f"      - {esc(name)}")
+    lines.append("")
+    lines.append("rules:")
+    lines.append("  - MATCH,PROXY")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
 class RealtimeLogger:
     def __init__(self, port=8080, password="admin", max_logs=500, action_callback=None):
         self.port = port
@@ -1219,6 +1450,16 @@ class RealtimeLogger:
                     proto_filter = (query.get("type", [""])[0] or "").lower()
                     if proto_filter in ("vless", "vmess"):
                         links = [l for l in links if l.startswith(f"{proto_filter}://")]
+
+                    if query.get("clash", ["0"])[0] == "1":
+                        clash_yaml = generate_clash_yaml(links)
+                        self._send_bytes(200, "text/yaml; charset=utf-8", clash_yaml.encode("utf-8"), {
+                            "Cache-Control": "no-store, no-cache, must-revalidate",
+                            "Profile-Update-Interval": "1",
+                            "Subscription-Userinfo": "upload=0; download=0; total=10737418240000; expire=0"
+                        })
+                        return
+
                     raw_text = "\n".join(links)
                     if query.get("raw", ["0"])[0] == "1":
                         body = (raw_text + "\n").encode("utf-8")
