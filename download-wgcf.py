@@ -3,7 +3,6 @@ import platform
 import sys
 import shutil
 import requests
-import zstandard as zstd
 import tarfile
 
 WGCF_VERSION = "v0.3.6"
@@ -47,17 +46,19 @@ def download_file(url, filename):
             f.write(chunk)
 
 def extract_tar_zstd(archive_path, extract_dir):
-   
-    dctx = zstd.ZstdDecompressor()
-    tar_path = archive_path.replace(".zstd", "")
-    
-    with open(archive_path, 'rb') as ifh, open(tar_path, 'wb') as ofh:
-        dctx.copy_stream(ifh, ofh)
-        
-    with tarfile.open(tar_path, "r:") as tar:
-        tar.extractall(path=extract_dir)
-        
-    os.remove(tar_path)
+    try:
+        import zstandard as zstd
+        dctx = zstd.ZstdDecompressor()
+        tar_path = archive_path.replace(".zstd", "")
+        with open(archive_path, 'rb') as ifh, open(tar_path, 'wb') as ofh:
+            dctx.copy_stream(ifh, ofh)
+        with tarfile.open(tar_path, "r:") as tar:
+            tar.extractall(path=extract_dir)
+        os.remove(tar_path)
+    except Exception:
+        os.makedirs(extract_dir, exist_ok=True)
+        import subprocess
+        subprocess.run(["tar", "--zstd", "-xf", archive_path, "-C", extract_dir], check=True)
 
 def install_wgcf():
     archive_name, binary_name = get_os_name()

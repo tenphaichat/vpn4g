@@ -5,7 +5,7 @@ ENV PYTHONUNBUFFERED=1
 
 # Cai Ubuntu stack giong het ban VPS Ubuntu de dat toc do mang toi da
 RUN apt-get update -y && apt-get install --no-install-recommends -y \
-    ca-certificates curl git procps python3 python3-pip \
+    ca-certificates curl git procps python3 python3-pip zstd \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
