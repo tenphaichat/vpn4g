@@ -398,9 +398,20 @@ def main():
 
         def build_stream_settings(transport, path_override=None):
             use_path = path_override or WS_PATH
+            sockopt = {"tcpNoDelay": True}
             if transport == "xhttp":
-                return {"network": "xhttp", "security": "none", "xhttpSettings": {"path": use_path, "mode": "auto"}}
-            return {"network": "ws", "security": "none", "wsSettings": {"path": use_path, "headers": {}}}
+                return {
+                    "network": "xhttp",
+                    "security": "none",
+                    "xhttpSettings": {"path": use_path, "mode": "auto"},
+                    "sockopt": sockopt
+                }
+            return {
+                "network": "ws",
+                "security": "none",
+                "wsSettings": {"path": use_path, "headers": {}, "heartbeatPeriod": 0},
+                "sockopt": sockopt
+            }
 
         def make_inbound(listen, port, transport, proto="vless", path_override=None):
             if proto == "vmess":
@@ -411,7 +422,7 @@ def main():
                 "port": port,
                 "listen": listen,
                 "protocol": proto,
-                "sniffing": {"enabled": True, "destOverride": ["http", "tls"]},
+                "sniffing": {"enabled": False},
                 "settings": settings,
                 "streamSettings": build_stream_settings(transport, path_override=path_override)
             }
@@ -559,12 +570,17 @@ def main():
                         "port": port,
                         "listen": ip,
                         "protocol": "vless",
+                        "sniffing": {"enabled": False},
                         "settings": {
                             "clients": [{"id": UUID, "level": 0}],
                             "decryption": "none",
                             "fallbacks": fallbacks
                         },
-                        "streamSettings": {"network": "tcp", "security": "none"}
+                        "streamSettings": {
+                            "network": "tcp",
+                            "security": "none",
+                            "sockopt": {"tcpNoDelay": True}
+                        }
                     })
                     inbounds.append(make_inbound("127.0.0.1", vless_ws_port, "websocket", proto="vless", path_override=WS_PATH))
                     if PROTOCOL == "both":
@@ -573,8 +589,27 @@ def main():
                     inbounds.append(make_inbound(ip, port, TRANSPORTS[0], proto=PROTOCOL, path_override=WS_PATH))
             xray_config = {
                 "log": {"loglevel": "error", "access": "none"},
+                "dns": {
+                    "queryStrategy": "UseIPv4",
+                    "servers": [
+                        "1.1.1.1",
+                        "1.0.0.1",
+                        "8.8.8.8",
+                        "localhost"
+                    ]
+                },
                 "inbounds": inbounds,
-                "outbounds": [{"protocol": "freedom", "settings": {"domainStrategy": "UseIPv4"}}]
+                "outbounds": [{"protocol": "freedom", "settings": {"domainStrategy": "UseIPv4"}}],
+                "policy": {
+                    "levels": {
+                        "0": {
+                            "handshake": 4,
+                            "connIdle": 300,
+                            "uplinkOnly": 2,
+                            "downlinkOnly": 5
+                        }
+                    }
+                }
             }
             if ENABLE_WARP and wgcf_outbound:
                 xray_config["outbounds"].insert(0, wgcf_outbound)
@@ -663,9 +698,10 @@ def main():
             def launch_cloudflared():
                 if RUN_MODE == "direct":
                     return None
+                tunnel_protocol = os.getenv("TUNNEL_PROTOCOL", "http2" if IS_RAILWAY else "auto").strip().lower()
                 if RUN_MODE == "named_tunnel":
-                    print("[*] Launching Cloudflare Named Tunnel (token mode, HTTP/2)...")
-                    named_tunnel_args = [CLF_BIN, "tunnel", "--protocol", "http2", "run", "--token", TUNNEL_TOKEN]
+                    print(f"[*] Launching Cloudflare Named Tunnel (token mode, {tunnel_protocol})...")
+                    named_tunnel_args = [CLF_BIN, "tunnel", "--protocol", tunnel_protocol, "run", "--token", TUNNEL_TOKEN]
                     return subprocess.Popen(
                         named_tunnel_args,
                         stdout=subprocess.PIPE,
@@ -675,7 +711,6 @@ def main():
                         errors="replace"
                     )
 
-                tunnel_protocol = "http2" if RUN_MODE == "quick_tunnel" else "auto"
                 print(f"[*] Launching Cloudflare Tunnel ({tunnel_protocol}) pointing to http://{CLOUDFLARE_TARGET_IP}:{CLOUDFLARE_TARGET_PORT}...")
                 return subprocess.Popen(
                     [CLF_BIN, "tunnel", "--protocol", tunnel_protocol, "--url", f"http://{CLOUDFLARE_TARGET_IP}:{CLOUDFLARE_TARGET_PORT}"],

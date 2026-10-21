@@ -24,6 +24,7 @@ DEFAULT_ENV_CONFIG = {
     "WS_HOST": "trycloudflare.com",
     "CUSTOM_DOMAIN": "",
     "TUNNEL_TOKEN": "",
+    "TUNNEL_PROTOCOL": "auto",
     "COUNTRY_CODE": "",
     "ENABLE_WARP": "false",
     "WEBHOOK_URL": "",
